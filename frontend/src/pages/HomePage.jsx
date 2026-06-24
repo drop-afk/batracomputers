@@ -243,8 +243,8 @@ const HomePage = () => {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
             {[
-              { icon: MapPin,   title: 'Location', content: 'Main Market, Rohtak,\nHaryana 124001, India', href: null },
-              { icon: Phone,    title: 'Phone',    content: '+91 98765 43210', href: 'tel:+919876543210' },
+              { icon: MapPin,   title: 'Location', content: 'Aryanagar, Rohtak,\nHaryana 124001, India', href: null },
+              { icon: Phone,    title: 'Phone',    content: '+91 94665 30255', href: 'tel:+919466530255' },
               { icon: Calendar, title: 'Hours',    content: 'Mon–Sat: 9 AM – 9 PM\nSun: 10 AM – 6 PM', href: null },
             ].map(({ icon: Icon, title, content, href }) => (
               <div key={title} className="card-hover text-center p-8">

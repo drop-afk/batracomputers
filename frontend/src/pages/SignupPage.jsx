@@ -67,7 +67,7 @@ const SignupPage = () => {
               </div>
               <div>
                 <label className="input-label">Phone</label>
-                <input type="tel" className={`input-field ${errors.phone ? 'border-red-400' : ''}`} placeholder="+91 98765 43210" {...register('phone', { required: 'Phone is required' })} />
+                <input type="tel" className={`input-field ${errors.phone ? 'border-red-400' : ''}`} placeholder="+91 94665 30255" {...register('phone', { required: 'Phone is required' })} />
                 {errors.phone && <p className="text-red-500 text-xs mt-1.5">{errors.phone.message}</p>}
               </div>
             </div>

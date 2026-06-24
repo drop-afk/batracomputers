@@ -318,7 +318,7 @@ const BookingPage = () => {
                 </div>
                 <div className="sm:col-span-2">
                   <label className="input-label">Phone *</label>
-                  <input type="tel" className={`input-field ${errors.customerPhone ? 'border-red-400' : ''}`} placeholder="+91 98765 43210" {...register('customerPhone', { required: 'Phone is required' })} />
+                  <input type="tel" className={`input-field ${errors.customerPhone ? 'border-red-400' : ''}`} placeholder="+91 94665 30255" {...register('customerPhone', { required: 'Phone is required' })} />
                   {errors.customerPhone && <p className="text-red-500 text-xs mt-1">{errors.customerPhone.message}</p>}
                 </div>
               </div>
@@ -366,7 +366,7 @@ const BookingPage = () => {
             </div>
             <div className="mt-4 card bg-amber-50 border-amber-100">
               <p className="text-xs text-amber-700 font-semibold mb-1">📌 Walk-in also welcome</p>
-              <p className="text-xs text-amber-600">You can also visit us at Main Market, Rohtak. Open Mon–Sat 9 AM – 9 PM.</p>
+              <p className="text-xs text-amber-600">You can also visit us at Aryanagar, Rohtak. Open Mon–Sat 9 AM – 9 PM.</p>
             </div>
           </div>
         </div>
