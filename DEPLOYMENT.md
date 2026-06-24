@@ -37,12 +37,11 @@ This guide outlines the steps to deploy the **Batra Booking System** (MERN Stack
    - `FRONTEND_URL`: *We will update this in Step 4 with your deployed frontend URL.*
 6. Click **Create Web Service**. It will deploy, and Render will provide you with a backend URL (e.g., `https://batra-booking-backend.onrender.com`). Note this down!
 
----
+## Step 3: Deploy the Frontend (Vercel, Netlify, or Render)
 
-## Step 3: Deploy the Frontend on Vercel
+You can choose one of the following platforms to host your frontend:
 
-Vercel is the easiest and fastest way to host Vite/React apps.
-
+### Option A: Vercel (Recommended)
 1. Sign up/Log in at [Vercel](https://vercel.com).
 2. Click **Add New** -> **Project**.
 3. Import your GitHub repository (`drop-afk/batracomputers`).
@@ -53,7 +52,37 @@ Vercel is the easiest and fastest way to host Vite/React apps.
    - **Output Directory:** `dist`
 5. Expand the **Environment Variables** section and add:
    - `VITE_API_URL`: *Your Render backend URL from Step 2 (e.g., `https://batra-booking-backend.onrender.com` — do NOT include a trailing slash).*
-6. Click **Deploy**. Once finished, Vercel will provide your live website URL (e.g., `https://batra-booking.vercel.app`).
+6. Click **Deploy**.
+
+### Option B: Netlify (Alternative)
+1. Sign up/Log in at [Netlify](https://www.netlify.com/).
+2. Click **Add new site** -> **Import an existing project**.
+3. Connect your GitHub and select `drop-afk/batracomputers`.
+4. Configure the Build settings:
+   - **Base directory:** `frontend`
+   - **Build command:** `npm run build`
+   - **Publish directory:** `frontend/dist` (or `dist`)
+5. Under **Environment variables**, add:
+   - `VITE_API_URL`: *Your Render backend URL from Step 2.*
+6. Click **Deploy**.
+7. *SPA Route Fix:* To make routing work on reload on Netlify, create a file named `_redirects` inside `frontend/public` containing: `/* /index.html 200`.
+
+### Option C: Render Static Site (Keep everything on Render)
+1. In your [Render](https://render.com/) dashboard, click **New +** and select **Static Site**.
+2. Connect your GitHub repository.
+3. Configure the Static Site:
+   - **Name:** `batra-booking-frontend`
+   - **Root Directory:** `frontend`
+   - **Build Command:** `npm run build`
+   - **Publish Directory:** `dist`
+4. Under **Environment**, add:
+   - `VITE_API_URL`: *Your Render backend URL from Step 2.*
+5. Under **Redirects/Rewrites** in the sidebar settings, add a rule:
+   - **Source:** `/*`
+   - **Destination:** `/index.html`
+   - **Action:** `Rewrite` (This ensures React routing works on page refresh).
+6. Save and deploy.
+
 
 ---
 
