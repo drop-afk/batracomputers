@@ -3,7 +3,10 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../utils/api';
-import { ArrowLeft, CheckCircle, Clock, IndianRupee, Loader2, Tag, Calendar, FileText, ArrowRight, LogIn, Upload } from 'lucide-react';
+import {
+  ArrowLeft, CheckCircle, Clock, IndianRupee, Loader2, Tag, Calendar,
+  FileText, ArrowRight, LogIn, Upload, AlertCircle, Shield, ChevronRight, Zap, Star
+} from 'lucide-react';
 import ServiceTiles from '../components/ServiceTiles';
 
 const BookingPage = () => {
@@ -19,11 +22,11 @@ const BookingPage = () => {
   const [bookingId, setBookingId] = useState(null);
   const [file, setFile] = useState(null);
   const [fileError, setFileError] = useState('');
+  const [step, setStep] = useState(1);
   const { register, handleSubmit, setValue, formState: { errors } } = useForm({
     defaultValues: { customerName: user?.name || '', customerEmail: user?.email || '', customerPhone: user?.phone || '' }
   });
 
-  // Redirect workers/owners away from booking page
   useEffect(() => {
     if (user?.role === 'worker') navigate('/dashboard');
     if (user?.role === 'owner') navigate('/admin');
@@ -44,20 +47,8 @@ const BookingPage = () => {
     }
   }, [serviceId, services]);
 
-  const handleServiceChange = (e) => {
-    const svc = services.find(s => s._id === e.target.value);
-    setSelectedService(svc); setValue('serviceId', e.target.value);
-  };
-
-  const handleServiceSelect = (id) => {
-    const svc = services.find(s => s._id === id);
-    if (svc) { setSelectedService(svc); setValue('serviceId', id); }
-  };
-
   const estimatedCost = selectedService ? selectedService.basePrice * quantity : 0;
   const minDate = new Date().toISOString().split('T')[0];
-
-  // PDF upload is mandatory for photocopy and printing services
   const requiresPdf = selectedService && ['photocopy', 'printing'].includes(selectedService.category);
   const maxDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
@@ -66,27 +57,19 @@ const BookingPage = () => {
     setFileError('');
     if (selectedFile) {
       if (selectedFile.type !== 'application/pdf') {
-        setFileError('Only PDF files are allowed');
-        setFile(null);
-        e.target.value = '';
-        return;
+        setFileError('Only PDF files are allowed'); setFile(null); e.target.value = ''; return;
       }
       if (selectedFile.size > 10 * 1024 * 1024) {
-        setFileError('File size must be under 10MB');
-        setFile(null);
-        e.target.value = '';
-        return;
+        setFileError('File size must be under 10MB'); setFile(null); e.target.value = ''; return;
       }
       setFile(selectedFile);
     }
   };
 
   const onSubmit = async (data) => {
-    // Enforce mandatory PDF for photocopy/printing
     if (requiresPdf && !file) {
-      setFileError('A PDF file is required for this service. Please upload the document you want printed/photocopied.');
-      document.getElementById('file-upload-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      return;
+      setFileError('A PDF file is required for this service. Please upload the document.');
+      setStep(1); return;
     }
     setLoading(true);
     try {
@@ -99,30 +82,25 @@ const BookingPage = () => {
       if (data.preferredDeadline) formData.append('preferredDeadline', data.preferredDeadline);
       if (data.specialRequirements) formData.append('specialRequirements', data.specialRequirements);
       if (file) formData.append('file', file);
-
       const res = await api.post('/bookings', formData);
-      setBookingId(res.data._id);
-      setShowSuccess(true);
-    } catch (err) {
-      alert(err.response?.data?.message || err.response?.data?.errors?.[0]?.msg || 'Failed to create booking');
-    } finally { setLoading(false); }
+      setBookingId(res.data._id); setShowSuccess(true);
+    } catch (err) { alert(err.response?.data?.message || err.response?.data?.errors?.[0]?.msg || 'Failed to create booking'); }
+    finally { setLoading(false); }
   };
 
-  // Show login prompt for unauthenticated users
   if (!isAuthenticated) {
     return (
       <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center px-4">
-        <div className="w-full max-w-md text-center animate-slide-up">
-          <div className="card p-10">
-            <div className="w-20 h-20 rounded-full bg-primary-100 flex items-center justify-center mx-auto mb-6">
-              <LogIn className="text-primary-600" size={44} />
+        <div className="w-full max-w-md text-center">
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-10">
+            <div className="w-16 h-16 rounded-2xl bg-blue-50 flex items-center justify-center mx-auto mb-5">
+              <LogIn className="text-blue-600" size={32} />
             </div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2 font-display">Sign in to Book</h2>
-            <p className="text-gray-500 mb-6">You need to be logged in to book a service. It's free and takes just a minute.</p>
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Sign in to Book</h2>
+            <p className="text-sm text-gray-500 mb-6">Create a free account or sign in to book services and track your orders.</p>
             <div className="space-y-3">
-              <Link to="/login" className="btn-primary w-full justify-center py-3">Sign In <ArrowRight size={16} /></Link>
-              <Link to="/signup" className="btn-secondary w-full justify-center py-3">Create an Account</Link>
-              <Link to="/" className="block text-sm text-gray-400 hover:text-gray-600 mt-2">Back to Home</Link>
+              <Link to="/login" className="block w-full py-3 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors">Sign In</Link>
+              <Link to="/signup" className="block w-full py-3 rounded-xl text-sm font-semibold text-gray-700 bg-gray-50 border border-gray-200 hover:bg-gray-100 transition-colors">Create Account</Link>
             </div>
           </div>
         </div>
@@ -132,20 +110,20 @@ const BookingPage = () => {
 
   if (showSuccess) return (
     <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center px-4">
-      <div className="w-full max-w-md text-center animate-slide-up">
-        <div className="card p-10">
-          <div className="w-20 h-20 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-6">
-            <CheckCircle className="text-emerald-500" size={44} />
+      <div className="w-full max-w-md text-center">
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-10">
+          <div className="w-16 h-16 rounded-2xl bg-emerald-50 flex items-center justify-center mx-auto mb-5">
+            <CheckCircle className="text-emerald-500" size={32} />
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2 font-display">Booking Confirmed!</h2>
-          <p className="text-gray-500 mb-6">Your request has been received. A worker will be assigned shortly.</p>
-          <div className="bg-primary-50 border border-primary-100 rounded-2xl p-5 mb-6 text-left">
-            <p className="text-xs text-primary-500 font-semibold uppercase tracking-wider mb-1">Booking ID</p>
-            <p className="font-mono text-sm font-bold text-primary-800 break-all">{bookingId}</p>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Booking Confirmed!</h2>
+          <p className="text-sm text-gray-500 mb-6">Your request has been received. We'll assign a worker shortly and notify you.</p>
+          <div className="bg-gray-50 rounded-xl p-4 mb-6">
+            <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mb-1">Booking ID</p>
+            <p className="font-mono text-sm font-bold text-gray-700 break-all">{bookingId}</p>
           </div>
           <div className="space-y-3">
-            <Link to="/my-bookings" className="btn-primary w-full justify-center py-3">View My Bookings <ArrowRight size={16} /></Link>
-            <button onClick={() => { setShowSuccess(false); navigate('/'); }} className="btn-secondary w-full justify-center py-3">Back to Home</button>
+            <Link to="/my-bookings" className="block w-full py-3 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors">View My Bookings</Link>
+            <button onClick={() => { setShowSuccess(false); setFile(null); setFileError(''); setQuantity(1); }} className="block w-full py-3 rounded-xl text-sm font-semibold text-gray-700 bg-gray-50 border border-gray-200 hover:bg-gray-100 transition-colors">Book Another Service</button>
           </div>
         </div>
       </div>
@@ -153,7 +131,7 @@ const BookingPage = () => {
   );
 
   return (
-    <div className="section py-8 animate-fade-in">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <Link to="/" className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-900 transition-colors mb-6">
         <ArrowLeft size={16} /> Back to Home
       </Link>
@@ -161,210 +139,167 @@ const BookingPage = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Form */}
         <div className="lg:col-span-2">
-          <div className="mb-6">
-            <h1 className="text-3xl font-bold text-gray-900 font-display">Book a Service</h1>
-            <p className="text-gray-500 mt-1">Fill in the details and we'll get it done</p>
-          </div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-1">Book a Service</h1>
+          <p className="text-sm text-gray-500 mb-6">Select a service, fill in details, and we'll handle the rest</p>
 
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-            {!serviceId ? (
-              <div className="card">
-                <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-full bg-primary-600 text-white text-xs flex items-center justify-center font-bold">1</div>
-                  Select Service
-                </h3>
-                {fetching ? <div className="h-12 bg-gray-100 rounded-xl animate-pulse" /> : (
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+            {/* Step 1: Service */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-7 h-7 rounded-lg bg-blue-600 text-white text-xs flex items-center justify-center font-bold">1</div>
+                <h3 className="font-semibold text-gray-900">Select Service</h3>
+              </div>
+              {!serviceId ? (
+                fetching ? <div className="h-12 bg-gray-100 rounded-xl animate-pulse" /> : (
                   <div className="space-y-3">
-                    <ServiceTiles services={services} selectedId={selectedService?._id} onSelect={handleServiceSelect} />
+                    <ServiceTiles services={services} selectedId={selectedService?._id} onSelect={(id) => { const svc = services.find(s => s._id === id); if (svc) { setSelectedService(svc); setValue('serviceId', id); } }} />
                     <input type="hidden" {...register('serviceId', { required: true })} />
                     {selectedService && (
-                      <div className="flex flex-wrap gap-4 mt-3">
+                      <div className="flex flex-wrap gap-2 mt-3">
                         <span className="inline-flex items-center gap-1.5 text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-lg px-3 py-1.5">
                           <Clock size={12} /> {selectedService.estimatedTime}
                         </span>
                         <span className="inline-flex items-center gap-1.5 text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-lg px-3 py-1.5">
                           <Tag size={12} /> {selectedService.priceUnit}
                         </span>
+                        <span className="inline-flex items-center gap-1.5 text-xs text-blue-600 bg-blue-50 border border-blue-100 rounded-lg px-3 py-1.5">
+                          <IndianRupee size={12} /> {selectedService.basePrice} per unit
+                        </span>
                       </div>
                     )}
                   </div>
-                )}
-              </div>
-            ) : (
-              <div className="card bg-primary-50 border-primary-100">
-                <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-full bg-primary-600 text-white text-xs flex items-center justify-center font-bold">1</div>
-                  Selected Service
-                </h3>
-                {fetching ? <div className="h-12 bg-gray-100 rounded-xl animate-pulse" /> : selectedService ? (
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold text-gray-900">{selectedService.name}</p>
-                      <p className="text-xs text-gray-500 mt-1">{selectedService.estimatedTime} · {selectedService.priceUnit}</p>
+                )
+              ) : (
+                <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+                  {fetching ? <div className="h-8 bg-blue-100/50 rounded-lg animate-pulse" /> : selectedService ? (
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold text-gray-900">{selectedService.name}</p>
+                        <p className="text-xs text-gray-500 mt-1">{selectedService.estimatedTime} · {selectedService.priceUnit}</p>
+                      </div>
+                      <p className="text-xl font-bold text-blue-700">₹{selectedService.basePrice}</p>
                     </div>
-                    <p className="text-xl font-extrabold text-primary-600">₹{selectedService.basePrice}</p>
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500">Service not found.</p>
-                )}
-                <input type="hidden" {...register('serviceId', { required: true })} />
-              </div>
-            )}
+                  ) : <p className="text-sm text-gray-500">Service not found.</p>}
+                  <input type="hidden" {...register('serviceId', { required: true })} />
+                </div>
+              )}
+            </div>
 
-            <div className="card">
-              <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
-                <div className="w-6 h-6 rounded-full bg-primary-600 text-white text-xs flex items-center justify-center font-bold">{serviceId ? '1' : '2'}</div>
-                Quantity & Schedule
-              </h3>
+            {/* Step 2: Quantity & Schedule */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-7 h-7 rounded-lg bg-blue-600 text-white text-xs flex items-center justify-center font-bold">2</div>
+                <h3 className="font-semibold text-gray-900">Quantity & Schedule</h3>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="input-label">Quantity</label>
-                  <input type="number" min="1" max="1000" className={`input-field ${errors.quantity ? 'border-red-400' : ''}`}
-                    {...register('quantity', { required: true, min: 1 })}
-                    value={quantity} onChange={(e) => setQuantity(Number(e.target.value) || 1)} />
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Quantity</label>
+                  <input type="number" min="1" max="1000" className={`w-full px-4 py-3 bg-white border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all ${errors.quantity ? 'border-red-400' : 'border-gray-200'}`}
+                    {...register('quantity', { required: true, min: 1 })} value={quantity} onChange={(e) => setQuantity(Number(e.target.value) || 1)} />
                 </div>
                 <div>
-                  <label className="input-label flex items-center gap-1"><Calendar size={13} /> Preferred Deadline <span className="text-gray-400 font-normal">(optional)</span></label>
-                  <input type="date" className="input-field" min={minDate} max={maxDate} {...register('preferredDeadline')} />
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5 flex items-center gap-1"><Calendar size={13} /> Preferred Deadline <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input type="date" className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all" min={minDate} max={maxDate} {...register('preferredDeadline')} />
                 </div>
               </div>
-              <div>
-                <label className="input-label mt-4 flex items-center gap-1"><FileText size={13} /> Special Requirements <span className="text-gray-400 font-normal">(optional)</span></label>
-                <textarea rows={3} className="input-field resize-none" placeholder="Double-sided, colour, A3 size, etc." {...register('specialRequirements')} />
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1.5 flex items-center gap-1"><FileText size={13} /> Special Requirements <span className="text-gray-400 font-normal">(optional)</span></label>
+                <textarea rows={3} className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all resize-none" placeholder="Double-sided, colour, A3 size, etc." {...register('specialRequirements')} />
               </div>
             </div>
 
-            {/* File Upload Section */}
-            <div id="file-upload-section" className={`card ${requiresPdf && !file && fileError ? 'border-red-300 bg-red-50' : ''}`}>
-              <h3 className="font-bold text-gray-900 mb-1 flex items-center gap-2">
-                <div className="w-6 h-6 rounded-full bg-primary-600 text-white text-xs flex items-center justify-center font-bold">{serviceId ? '2' : '3'}</div>
-                Upload Document
-                {requiresPdf ? (
-                  <span className="text-red-500 text-xs font-semibold bg-red-100 px-2 py-0.5 rounded-full flex items-center gap-1">
-                    <span>Required</span>
-                  </span>
-                ) : (
-                  <span className="text-gray-400 font-normal text-xs">(optional)</span>
-                )}
-              </h3>
-              {requiresPdf ? (
-                <p className="text-xs text-red-600 font-medium mb-3 flex items-center gap-1">
-                  ⚠️ This service requires a PDF. Please upload the document you want {selectedService?.category === 'photocopy' ? 'photocopied' : 'printed'}.
-                </p>
-              ) : (
-                <p className="text-xs text-gray-500 mb-3">Upload a PDF file (e.g., document to print/photocopy). Max 10MB.</p>
-              )}
-              <div className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
-                requiresPdf && !file
-                  ? 'border-red-300 hover:border-red-400 bg-red-50'
-                  : file
-                  ? 'border-green-300 bg-green-50'
-                  : 'border-gray-200 hover:border-primary-300'
-              }`}>
-                <input
-                  type="file"
-                  accept=".pdf,application/pdf"
-                  onChange={handleFileChange}
-                  className="hidden"
-                  id="file-upload"
-                />
-                <label htmlFor="file-upload" className="cursor-pointer">
+            {/* Step 3: File Upload */}
+            <div className={`bg-white rounded-2xl border shadow-sm p-6 ${requiresPdf && !file && fileError ? 'border-red-300' : 'border-gray-100'}`}>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-7 h-7 rounded-lg bg-blue-600 text-white text-xs flex items-center justify-center font-bold">3</div>
+                <h3 className="font-semibold text-gray-900">Upload Document</h3>
+                {requiresPdf ? <span className="text-red-500 text-xs font-semibold bg-red-50 px-2 py-0.5 rounded-full">Required</span> : <span className="text-gray-400 text-xs font-normal">(optional)</span>}
+              </div>
+              {requiresPdf && <p className="text-xs text-red-600 font-medium mb-3 flex items-center gap-1"><AlertCircle size={12} /> This service requires a PDF document</p>}
+              <div className={`border-2 border-dashed rounded-xl p-6 text-center transition-all ${requiresPdf && !file ? 'border-red-300 bg-red-50/50 hover:border-red-400' : file ? 'border-emerald-300 bg-emerald-50/50' : 'border-gray-200 hover:border-blue-300'}`}>
+                <input type="file" accept=".pdf,application/pdf" onChange={handleFileChange} className="hidden" id="file-upload" />
+                <label htmlFor="file-upload" className="cursor-pointer block">
                   {file ? (
                     <div className="flex items-center justify-center gap-2 text-sm">
-                      <FileText size={20} className="text-green-600" />
+                      <FileText size={20} className="text-emerald-600" />
                       <span className="font-medium text-gray-700">{file.name}</span>
                       <span className="text-xs text-gray-400">({(file.size / 1024 / 1024).toFixed(1)} MB)</span>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center gap-2">
                       <Upload size={24} className={requiresPdf ? 'text-red-400' : 'text-gray-400'} />
-                      <span className={`text-sm font-medium ${requiresPdf ? 'text-red-600' : 'text-gray-600'}`}>
-                        {requiresPdf ? 'Upload your PDF document (required)' : 'Click to upload a PDF'}
-                      </span>
+                      <span className={`text-sm font-medium ${requiresPdf ? 'text-red-600' : 'text-gray-600'}`}>{requiresPdf ? 'Upload your PDF (required)' : 'Click to upload a PDF'}</span>
                       <span className="text-xs text-gray-400">PDF only · Max 10MB</span>
                     </div>
                   )}
                 </label>
               </div>
               {fileError && <p className="text-red-500 text-xs mt-2 font-medium">{fileError}</p>}
-              {file && (
-                <button
-                  type="button"
-                  onClick={() => { setFile(null); setFileError(''); }}
-                  className="text-xs text-red-500 hover:text-red-700 mt-2"
-                >
-                  Remove file
-                </button>
-              )}
+              {file && <button type="button" onClick={() => { setFile(null); setFileError(''); }} className="text-xs text-red-500 hover:text-red-700 mt-2">Remove file</button>}
             </div>
 
-            <div className="card">
-              <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
-                <div className="w-6 h-6 rounded-full bg-primary-600 text-white text-xs flex items-center justify-center font-bold">{serviceId ? '3' : '4'}</div>
-                Your Details
-              </h3>
+            {/* Step 4: Your Details */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-7 h-7 rounded-lg bg-blue-600 text-white text-xs flex items-center justify-center font-bold">4</div>
+                <h3 className="font-semibold text-gray-900">Your Details</h3>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="input-label">Full Name *</label>
-                  <input className={`input-field ${errors.customerName ? 'border-red-400' : ''}`} placeholder="Rahul Sharma" {...register('customerName', { required: 'Name is required' })} />
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Full Name *</label>
+                  <input className={`w-full px-4 py-3 bg-white border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all ${errors.customerName ? 'border-red-400' : 'border-gray-200'}`} placeholder="Your name" {...register('customerName', { required: 'Name is required' })} />
                   {errors.customerName && <p className="text-red-500 text-xs mt-1">{errors.customerName.message}</p>}
                 </div>
                 <div>
-                  <label className="input-label">Email *</label>
-                  <input type="email" className={`input-field ${errors.customerEmail ? 'border-red-400' : ''}`} placeholder="rahul@example.com" {...register('customerEmail', { required: 'Email is required' })} />
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Email *</label>
+                  <input type="email" className={`w-full px-4 py-3 bg-white border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all ${errors.customerEmail ? 'border-red-400' : 'border-gray-200'}`} placeholder="you@example.com" {...register('customerEmail', { required: 'Email is required' })} />
                   {errors.customerEmail && <p className="text-red-500 text-xs mt-1">{errors.customerEmail.message}</p>}
                 </div>
                 <div className="sm:col-span-2">
-                  <label className="input-label">Phone *</label>
-                  <input type="tel" className={`input-field ${errors.customerPhone ? 'border-red-400' : ''}`} placeholder="+91 94665 30255" {...register('customerPhone', { required: 'Phone is required' })} />
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Phone *</label>
+                  <input type="tel" className={`w-full px-4 py-3 bg-white border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all ${errors.customerPhone ? 'border-red-400' : 'border-gray-200'}`} placeholder="+91 98765 43210" {...register('customerPhone', { required: 'Phone is required' })} />
                   {errors.customerPhone && <p className="text-red-500 text-xs mt-1">{errors.customerPhone.message}</p>}
                 </div>
               </div>
             </div>
 
-            <button type="submit" disabled={loading} className="btn-primary w-full py-4 text-base">
-              {loading ? <><Loader2 className="animate-spin" size={20} /> Processing...</> : <>Confirm Booking <ArrowRight size={18} /></>}
+            <button type="submit" disabled={loading} className="w-full py-4 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+              {loading ? <><Loader2 className="animate-spin" size={18} /> Processing...</> : <><ArrowRight size={18} /> Confirm Booking</>}
             </button>
           </form>
         </div>
 
-        {/* Sticky summary */}
+        {/* Sticky Order Summary */}
         <div className="lg:col-span-1">
           <div className="sticky top-24">
-            <div className="card border-primary-100">
-              <h3 className="font-bold text-gray-900 mb-5 font-display">Order Summary</h3>
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+              <h3 className="font-semibold text-gray-900 mb-5">Order Summary</h3>
               {selectedService ? (
                 <div className="space-y-4">
-                  <div className="flex justify-between text-sm">
+                  <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-500">Service</span>
                     <span className="font-semibold text-gray-900 text-right max-w-[55%]">{selectedService.name}</span>
                   </div>
-                  <div className="flex justify-between text-sm">
+                  <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-500">Unit Price</span>
                     <span className="font-semibold">₹{selectedService.basePrice}</span>
                   </div>
-                  <div className="flex justify-between text-sm">
+                  <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-500">Quantity</span>
                     <span className="font-semibold">{quantity}</span>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">Est. Time</span>
-                    <span className="font-semibold">{selectedService.estimatedTime}</span>
-                  </div>
                   <div className="h-px bg-gray-100 my-1" />
-                  <div className="flex justify-between">
-                    <span className="font-bold text-gray-900">Estimated Total</span>
-                    <span className="text-2xl font-extrabold text-primary-600">₹{estimatedCost}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-gray-900">Estimated Total</span>
+                    <span className="text-2xl font-bold text-blue-700">₹{estimatedCost}</span>
                   </div>
                   <p className="text-xs text-gray-400 leading-relaxed">Final amount may vary based on actual work. Payment collected at pickup.</p>
                 </div>
-              ) : (
-                <div className="text-center py-6 text-gray-400 text-sm">Select a service to see pricing</div>
-              )}
+              ) : <p className="text-center text-sm text-gray-400 py-4">Select a service to see pricing</p>}
             </div>
-            <div className="mt-4 card bg-amber-50 border-amber-100">
-              <p className="text-xs text-amber-700 font-semibold mb-1">📌 Walk-in also welcome</p>
-              <p className="text-xs text-amber-600">You can also visit us at Aryanagar, Rohtak. Open Mon–Sat 9 AM – 9 PM.</p>
+            <div className="mt-4 bg-amber-50 border border-amber-100 rounded-2xl p-4">
+              <p className="text-xs text-amber-700 font-semibold mb-1 flex items-center gap-1"><Shield size={12} /> Secure & Trusted</p>
+              <p className="text-xs text-amber-600">Your data is protected. We serve thousands of customers in Rohtak.</p>
             </div>
           </div>
         </div>

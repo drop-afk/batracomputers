@@ -2,31 +2,31 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../utils/api';
-import { format } from 'date-fns';
 import {
-  ClipboardList, CheckCircle, Clock, AlertCircle, Star,
-  Loader2, TrendingUp, ArrowRight, Package, RefreshCw
+  ClipboardList, CheckCircle, Clock, AlertCircle, Star, RefreshCw,
+  TrendingUp, ArrowRight, Package, Zap, Timer, Download, FileText
 } from 'lucide-react';
 
 const statusConfig = {
-  pending:     { label: 'Pending',     cls: 'badge-pending',     icon: Clock },
-  accepted:    { label: 'Accepted',    cls: 'badge-accepted',    icon: CheckCircle },
-  in_progress: { label: 'In Progress', cls: 'badge-in-progress', icon: AlertCircle },
-  completed:   { label: 'Completed',   cls: 'badge-completed',   icon: CheckCircle },
+  pending:     { label: 'New Request',   cls: 'bg-amber-50 text-amber-700 border-amber-200',     icon: Clock,         dot: 'bg-amber-500' },
+  accepted:    { label: 'Assigned',      cls: 'bg-blue-50 text-blue-700 border-blue-200',       icon: CheckCircle,   dot: 'bg-blue-500' },
+  in_progress: { label: 'In Progress',   cls: 'bg-orange-50 text-orange-700 border-orange-200', icon: Zap,           dot: 'bg-orange-500' },
+  completed:   { label: 'Done',          cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle, dot: 'bg-emerald-500' },
+  rejected:    { label: 'Declined',      cls: 'bg-red-50 text-red-700 border-red-200',           icon: AlertCircle,   dot: 'bg-red-500' },
 };
 
 const WorkerDashboard = () => {
   const { user } = useAuth();
   const [pending, setPending] = useState([]);
   const [myTasks, setMyTasks] = useState([]);
-  const [stats, setStats] = useState({ completed: 0, pending: 0, rating: 0 });
+  const [stats, setStats] = useState({ completed: 0, pending: 0, rating: 0, total: 0, week: 0 });
   const [loading, setLoading] = useState(true);
   const [accepting, setAccepting] = useState(null);
   const [updating, setUpdating] = useState(null);
   const [confirmComplete, setConfirmComplete] = useState(null);
   const [confirmAccept, setConfirmAccept] = useState(null);
-  // Track downloaded file IDs locally so UI updates immediately after download
   const [downloadedFiles, setDownloadedFiles] = useState(new Set());
+  const [lastUpdated, setLastUpdated] = useState(new Date());
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -38,10 +38,13 @@ const WorkerDashboard = () => {
       setPending(pendingRes.data.slice(0, 5));
       setMyTasks(tasksRes.data.filter(t => t.status !== 'completed').slice(0, 5));
       setStats({
-        completed: analyticsRes.data.completedWeek || 0,
+        completed: analyticsRes.data.totalCompleted || 0,
         pending: pendingRes.data.length,
-        rating: analyticsRes.data.avgRating || 0
+        rating: analyticsRes.data.avgRating || 0,
+        total: analyticsRes.data.completedWeek || 0,
+        week: analyticsRes.data.completedWeek || 0
       });
+      setLastUpdated(new Date());
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
   }, [user?._id]);
@@ -66,170 +69,271 @@ const WorkerDashboard = () => {
     finally { setUpdating(null); }
   };
 
-  const statCards = [
-    { label: 'This Week', value: stats.completed, suffix: 'done', color: 'from-emerald-500 to-teal-600', icon: CheckCircle },
-    { label: 'New Requests', value: stats.pending, suffix: 'pending', color: 'from-amber-500 to-orange-500', icon: ClipboardList },
-    { label: 'My Rating', value: stats.rating ? stats.rating.toFixed(1) : '—', suffix: '/5.0', color: 'from-primary-500 to-violet-600', icon: Star },
-  ];
+  const formatTime = (date) => {
+    if (!date) return '';
+    const d = new Date(date);
+    const now = new Date();
+    const diff = Math.floor((now - d) / 60000);
+    if (diff < 1) return 'Just now';
+    if (diff < 60) return `${diff}m ago`;
+    if (diff < 1440) return `${Math.floor(diff/60)}h ago`;
+    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  };
 
   return (
-    <div className="section py-8 animate-fade-in">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 font-display">
-            Hey, {user?.name?.split(' ')[0]} 👋
-          </h1>
-          <p className="text-gray-500 mt-1">Here's what's happening today</p>
+          <h1 className="text-2xl font-bold text-gray-900">Worker Dashboard</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Welcome back, {user?.name?.split(' ')[0]} · 
+            <span className="inline-flex items-center gap-1.5 ml-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Live updates
+            </span>
+          </p>
         </div>
-        <button onClick={fetchDashboard} className="btn-ghost px-3 py-2 text-gray-400 hover:text-gray-700">
-          <RefreshCw size={18} />
-        </button>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-400">
+            Updated {lastUpdated.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+          </span>
+          <button onClick={fetchDashboard} className="p-2 rounded-lg bg-white border border-gray-200 text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-all">
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+          </button>
+        </div>
       </div>
 
-      {/* Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-8">
-        {statCards.map(({ label, value, suffix, color, icon: Icon }) => (
-          <div key={label} className={`rounded-2xl bg-gradient-to-br ${color} text-white p-6 shadow-card-md`}>
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-white/70 text-sm font-medium">{label}</p>
-                <p className="text-4xl font-extrabold mt-1">{loading ? '—' : value}</p>
-                <p className="text-white/60 text-sm">{suffix}</p>
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-                <Icon size={20} />
-              </div>
+      {/* Stats Row */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+        {[
+          { label: 'This Week', value: stats.week, suffix: 'done', icon: TrendingUp, color: 'from-emerald-500 to-teal-500' },
+          { label: 'Total Done', value: stats.completed, suffix: 'all time', icon: CheckCircle, color: 'from-blue-500 to-indigo-500' },
+          { label: 'New Requests', value: stats.pending, suffix: 'pending', icon: ClipboardList, color: 'from-amber-500 to-orange-500' },
+          { label: 'My Rating', value: stats.rating ? stats.rating.toFixed(1) : '—', suffix: '/5', icon: Star, color: 'from-violet-500 to-purple-500' },
+        ].map(({ label, value, suffix, color, icon: Icon }) => (
+          <div key={label} className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm hover:shadow-md transition-shadow">
+            <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center mb-3`}>
+              <Icon size={18} className="text-white" />
             </div>
+            <p className="text-2xl font-bold text-gray-900">{loading ? '—' : value}</p>
+            <p className="text-xs text-gray-500 mt-0.5">{label} <span className="text-gray-400">· {suffix}</span></p>
           </div>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Pending Requests */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-5">
-            <h2 className="font-bold text-gray-900 font-display">New Requests</h2>
-            <Link to="/dashboard/pending" className="text-sm font-semibold text-primary-600 hover:text-primary-700 flex items-center gap-1">
-              View all <ArrowRight size={14} />
-            </Link>
-          </div>
-          {loading ? (
-            <div className="space-y-3">{[...Array(3)].map((_, i) => <div key={i} className="h-16 bg-gray-100 rounded-xl animate-pulse" />)}</div>
-          ) : pending.length === 0 ? (
-            <div className="text-center py-10"><Package className="mx-auto text-gray-200 mb-3" size={40} /><p className="text-gray-400 text-sm">No pending requests</p></div>
-          ) : (
-            <div className="space-y-3">
-              {pending.map(b => (
-                <div key={b._id} className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:border-primary-100 hover:bg-primary-50/30 transition-all group">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-gray-900 text-sm truncate">{b.serviceName}</p>
-                    <p className="text-xs text-gray-400">{b.customerName} · Qty {b.quantity} · <span className="font-semibold text-primary-600">₹{b.estimatedCost}</span></p>
-                  </div>
-                  <button onClick={() => setConfirmAccept(b)} className="flex-shrink-0 btn-primary text-xs px-3 py-1.5">
-                    Accept
-                  </button>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Active Tasks */}
+        <div className="lg:col-span-2">
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="p-5 border-b border-gray-50 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
+                  <Package size={16} className="text-blue-600" />
                 </div>
-              ))}
+                <div>
+                  <h2 className="font-semibold text-gray-900 text-sm">My Active Tasks</h2>
+                  <p className="text-xs text-gray-400">Tasks assigned to you</p>
+                </div>
+              </div>
+              <Link to="/dashboard/my-tasks" className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1">
+                View all <ArrowRight size={12} />
+              </Link>
             </div>
-          )}
+            <div className="divide-y divide-gray-50">
+              {loading ? (
+                [...Array(3)].map((_, i) => (
+                  <div key={i} className="p-5">
+                    <div className="h-4 bg-gray-100 rounded-lg w-3/4 mb-2 animate-pulse" />
+                    <div className="h-3 bg-gray-100 rounded-lg w-1/2 animate-pulse" />
+                  </div>
+                ))
+              ) : myTasks.length === 0 ? (
+                <div className="p-10 text-center">
+                  <div className="w-16 h-16 rounded-2xl bg-gray-50 flex items-center justify-center mx-auto mb-3">
+                    <Package size={24} className="text-gray-300" />
+                  </div>
+                  <p className="text-sm text-gray-500 font-medium">No active tasks</p>
+                  <p className="text-xs text-gray-400 mt-1">Check new requests to pick up work</p>
+                </div>
+              ) : (
+                myTasks.map(t => {
+                  const st = statusConfig[t.status];
+                  const Icon = st?.icon || Clock;
+                  return (
+                    <div key={t._id} className="p-5 hover:bg-gray-50/50 transition-colors">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${st?.cls}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${st?.dot}`} />
+                              <Icon size={10} /> {st?.label}
+                            </span>
+                            <span className="text-xs text-gray-400">{formatTime(t.createdAt)}</span>
+                          </div>
+                          <h3 className="font-semibold text-gray-900 text-sm">{t.serviceName}</h3>
+                          <p className="text-xs text-gray-500 mt-0.5">{t.customerName} · Qty {t.quantity} · <span className="font-semibold text-blue-600">₹{t.estimatedCost}</span></p>
+                          {t.specialRequirements && (
+                            <p className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded mt-2 inline-block">{t.specialRequirements}</p>
+                          )}
+                        </div>
+                        <div className="flex-shrink-0">
+                          {t.status === 'accepted' && (
+                            <button
+                              onClick={() => updateStatus(t._id, 'in_progress')}
+                              disabled={updating === t._id}
+                              className="text-xs font-semibold bg-orange-50 text-orange-700 border border-orange-200 px-3 py-1.5 rounded-lg hover:bg-orange-100 transition-colors disabled:opacity-50"
+                            >
+                              {updating === t._id ? 'Starting...' : <><Zap size={10} className="inline mr-1" /> Start Work</>}
+                            </button>
+                          )}
+                          {t.status === 'in_progress' && (
+                            <div className="flex flex-col items-end gap-2">
+                              {t.fileUrl && !t.fileDownloaded && !downloadedFiles.has(t._id) && (
+                                <span className="text-[10px] text-red-600 bg-red-50 px-2 py-1 rounded border border-red-100 flex items-center gap-1">
+                                  <AlertCircle size={9} /> Download PDF first
+                                </span>
+                              )}
+                              <button
+                                onClick={() => setConfirmComplete(t)}
+                                disabled={t.fileUrl && !t.fileDownloaded && !downloadedFiles.has(t._id)}
+                                className="text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                <CheckCircle size={10} className="inline mr-1" /> Mark Done
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {t.fileUrl && t.status === 'in_progress' && (
+                        <button
+                          onClick={() => {
+                            const token = localStorage.getItem('token');
+                            fetch(`${import.meta.env.VITE_API_URL || '/api'}/bookings/${t._id}/file`, {
+                              headers: { Authorization: `Bearer ${token}` }
+                            })
+                              .then(r => r.blob())
+                              .then(blob => {
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = t.fileOriginalName || 'document.pdf';
+                                a.click();
+                                URL.revokeObjectURL(url);
+                                setDownloadedFiles(prev => new Set(prev).add(t._id));
+                              })
+                              .catch(() => alert('Failed to download file'));
+                          }}
+                          className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors"
+                        >
+                          <Download size={12} /><FileText size={12} /> Download PDF
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
         </div>
 
-        {/* My Active Tasks */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-5">
-            <h2 className="font-bold text-gray-900 font-display">My Active Tasks</h2>
-            <Link to="/dashboard/my-tasks" className="text-sm font-semibold text-primary-600 hover:text-primary-700 flex items-center gap-1">
-              View all <ArrowRight size={14} />
-            </Link>
-          </div>
-          {loading ? (
-            <div className="space-y-3">{[...Array(3)].map((_, i) => <div key={i} className="h-16 bg-gray-100 rounded-xl animate-pulse" />)}</div>
-          ) : myTasks.length === 0 ? (
-            <div className="text-center py-10"><TrendingUp className="mx-auto text-gray-200 mb-3" size={40} /><p className="text-gray-400 text-sm">No active tasks</p></div>
-          ) : (
-            <div className="space-y-3">
-              {myTasks.map(t => {
-                const st = statusConfig[t.status];
-                const Icon = st?.icon || Clock;
-                return (
-                  <div key={t._id} className="p-3 rounded-xl border border-gray-100 hover:border-gray-200 transition-all">
-                    <div className="flex items-center justify-between gap-3 mb-2">
-                      <p className="font-semibold text-gray-900 text-sm truncate flex-1">{t.serviceName}</p>
-                      <span className={`badge ${st?.cls} flex-shrink-0`}><Icon size={10} />{st?.label}</span>
-                    </div>
-                    <p className="text-xs text-gray-400 mb-2">{t.customerName}</p>
-                    <div className="flex gap-2">
-                      {t.status === 'accepted' && (
-                        <button onClick={() => updateStatus(t._id, 'in_progress')} disabled={updating === t._id}
-                          className="flex-1 text-xs font-semibold bg-orange-100 text-orange-700 py-1.5 rounded-lg hover:bg-orange-200 transition-colors disabled:opacity-50">
-                          {updating === t._id ? 'Updating…' : 'Start Work'}
-                        </button>
-                      )}
-                      {t.status === 'in_progress' && (
-                        <button
-                          onClick={() => setConfirmComplete(t)}
-                          disabled={t.fileUrl && !t.fileDownloaded && !downloadedFiles.has(t._id)}
-                          className="flex-1 text-xs font-semibold bg-emerald-100 text-emerald-700 py-1.5 rounded-lg hover:bg-emerald-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          Mark Complete
-                        </button>
-                      )}
-                    </div>
-                    {t.fileUrl && t.status === 'in_progress' && !t.fileDownloaded && !downloadedFiles.has(t._id) && (
-                      <p className="text-[11px] text-red-600 bg-red-50 p-1.5 rounded mt-2 border border-red-100 flex items-center gap-1">
-                        <AlertCircle size={10} />
-                        Download the PDF before completing.
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
+        {/* New Requests Panel */}
+        <div>
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="p-5 border-b border-gray-50 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center">
+                  <ClipboardList size={16} className="text-amber-600" />
+                </div>
+                <div>
+                  <h2 className="font-semibold text-gray-900 text-sm">New Requests</h2>
+                  <p className="text-xs text-gray-400">Available to pick up</p>
+                </div>
+              </div>
+              <Link to="/dashboard/pending" className="text-xs font-semibold text-amber-600 hover:text-amber-700 flex items-center gap-1">
+                View all <ArrowRight size={12} />
+              </Link>
             </div>
-          )}
+            <div className="divide-y divide-gray-50">
+              {loading ? (
+                [...Array(3)].map((_, i) => (
+                  <div key={i} className="p-4">
+                    <div className="h-3 bg-gray-100 rounded-lg w-2/3 mb-2 animate-pulse" />
+                    <div className="h-2.5 bg-gray-100 rounded-lg w-1/2 animate-pulse" />
+                  </div>
+                ))
+              ) : pending.length === 0 ? (
+                <div className="p-8 text-center">
+                  <ClipboardList size={24} className="text-gray-300 mx-auto mb-2" />
+                  <p className="text-xs text-gray-400">No new requests right now</p>
+                </div>
+              ) : (
+                pending.map(b => (
+                  <div key={b._id} className="p-4 hover:bg-gray-50/50 transition-colors">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-semibold text-gray-700">{b.serviceName}</span>
+                      <span className="text-xs font-bold text-blue-600">₹{b.estimatedCost}</span>
+                    </div>
+                    <p className="text-xs text-gray-500">{b.customerName} · Qty {b.quantity}</p>
+                    <div className="flex items-center justify-between mt-2">
+                      <span className="text-[10px] text-gray-400">{formatTime(b.createdAt)}</span>
+                      <button
+                        onClick={() => setConfirmAccept(b)}
+                        className="text-[10px] font-semibold bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition-colors"
+                      >
+                        Accept
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Confirm Accept Modal */}
+      {/* Accept Confirmation */}
       {confirmAccept && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-7 shadow-card-lg animate-slide-up">
-            <h3 className="text-xl font-bold text-gray-900 mb-1 font-display">Accept this booking?</h3>
-            <p className="text-sm text-gray-500 mb-1">Service: <strong>{confirmAccept.serviceName}</strong></p>
-            <p className="text-sm text-gray-500 mb-5">Customer: {confirmAccept.customerName} · Qty: {confirmAccept.quantity}</p>
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl animate-in fade-in zoom-in duration-200">
+            <h3 className="text-lg font-bold text-gray-900 mb-1">Accept this request?</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              <strong>{confirmAccept.serviceName}</strong> for {confirmAccept.customerName} · ₹{confirmAccept.estimatedCost}
+            </p>
             <div className="flex gap-3">
-              <button onClick={() => setConfirmAccept(null)} className="btn-secondary flex-1">Cancel</button>
-              <button onClick={() => acceptBooking(confirmAccept._id)} disabled={accepting === confirmAccept._id} className="btn-primary flex-1">
-                {accepting === confirmAccept._id ? <Loader2 className="animate-spin" size={18} /> : 'Yes, Assign to Me'}
+              <button onClick={() => setConfirmAccept(null)} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-600 bg-gray-50 hover:bg-gray-100 transition-colors">Cancel</button>
+              <button onClick={() => acceptBooking(confirmAccept._id)} disabled={accepting === confirmAccept._id} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors disabled:opacity-50">
+                {accepting === confirmAccept._id ? 'Accepting...' : 'Yes, Accept'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Confirm Complete Modal */}
+      {/* Complete Confirmation */}
       {confirmComplete && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-7 shadow-card-lg animate-slide-up">
-            <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
-              <CheckCircle className="text-emerald-500" size={32} />
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl animate-in fade-in zoom-in duration-200">
+            <div className="w-14 h-14 rounded-2xl bg-emerald-50 flex items-center justify-center mx-auto mb-4">
+              <CheckCircle className="text-emerald-500" size={28} />
             </div>
-            <h3 className="text-xl font-bold text-gray-900 text-center mb-1 font-display">Mark as Complete?</h3>
-            <p className="text-sm text-gray-500 text-center mb-5">Confirm you've finished <strong>{confirmComplete.serviceName}</strong> for {confirmComplete.customerName}</p>
+            <h3 className="text-lg font-bold text-gray-900 text-center mb-1">Mark as Done?</h3>
+            <p className="text-sm text-gray-500 text-center mb-5">
+              Confirm completion of <strong>{confirmComplete.serviceName}</strong>
+            </p>
             {confirmComplete.fileUrl && !confirmComplete.fileDownloaded && !downloadedFiles.has(confirmComplete._id) && (
-              <p className="text-xs text-red-600 bg-red-50 p-2 rounded mb-4 border border-red-100 flex items-center gap-1.5 text-center justify-center">
-                <AlertCircle size={12} />
-                You must download the attached PDF before completing this task.
+              <p className="text-xs text-red-600 bg-red-50 p-2 rounded-lg mb-4 border border-red-100 text-center flex items-center justify-center gap-1">
+                <AlertCircle size={11} /> Download the PDF before completing
               </p>
             )}
             <div className="flex gap-3">
-              <button onClick={() => setConfirmComplete(null)} className="btn-secondary flex-1">Cancel</button>
+              <button onClick={() => setConfirmComplete(null)} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-600 bg-gray-50 hover:bg-gray-100 transition-colors">Cancel</button>
               <button
                 onClick={() => updateStatus(confirmComplete._id, 'completed')}
                 disabled={updating === confirmComplete._id || (confirmComplete.fileUrl && !confirmComplete.fileDownloaded && !downloadedFiles.has(confirmComplete._id))}
-                className="flex-1 bg-emerald-600 text-white py-2.5 rounded-xl font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors disabled:opacity-40"
               >
-                {updating === confirmComplete._id ? <Loader2 className="animate-spin mx-auto" size={18} /> : 'Yes, Complete'}
+                {updating === confirmComplete._id ? 'Completing...' : 'Yes, Done'}
               </button>
             </div>
           </div>

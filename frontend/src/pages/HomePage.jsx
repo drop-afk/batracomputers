@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../utils/api';
-import ServiceModal from '../components/ServiceModal';
 import {
   Clock, Phone, MapPin, Calendar, ArrowRight,
   Printer, FileText, BookOpen, Ticket, MoreHorizontal,
@@ -28,7 +27,6 @@ const HomePage = () => {
   const { isAuthenticated, user } = useAuth();
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showServiceModal, setShowServiceModal] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -75,7 +73,7 @@ const HomePage = () => {
             <div className="flex flex-wrap gap-3">
               {(!isAuthenticated || user?.role === 'customer') ? (
                 <button
-                  onClick={() => setShowServiceModal(true)}
+                  onClick={() => navigate('/booking')}
                   className="inline-flex items-center gap-2 bg-white text-primary-700 px-7 py-3.5 rounded-2xl font-bold hover:bg-primary-50 transition-all duration-150 shadow-xl hover:shadow-2xl hover:-translate-y-0.5"
                 >
                   Book a Service <ArrowRight size={18} />
@@ -132,13 +130,6 @@ const HomePage = () => {
           </div>
         </div>
       </section>
-
-      <ServiceModal
-        open={showServiceModal}
-        onClose={() => setShowServiceModal(false)}
-        services={services}
-        onSelect={(id) => { setShowServiceModal(false); navigate(`/booking/${id}`); }}
-      />
 
       {/* ── Services ── */}
       <section className="section py-16">
