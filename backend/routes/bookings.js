@@ -103,6 +103,14 @@ const validate = (req, res, next) => {
   next();
 };
 
+// GET /bookings/payment-config — lets the frontend safely enable online payment
+router.get('/payment-config', authenticate, (req, res) => {
+  res.json({
+    onlinePaymentAvailable: Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET),
+    provider: 'razorpay'
+  });
+});
+
 // POST /bookings — requires auth; handles optional file upload (Issue #28)
 router.post('/', authenticate, upload.fields([
   { name: 'files', maxCount: 5 },

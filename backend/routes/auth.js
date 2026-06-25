@@ -5,7 +5,12 @@ const bcrypt = require('bcryptjs');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
 const SignupVerification = require('../models/SignupVerification');
-const { isDevOtpMode, sendEmailOtp, sendWhatsAppOtp } = require('../services/otpDelivery');
+const {
+  isDevOtpMode,
+  isScreenOtpMode,
+  sendEmailOtp,
+  sendWhatsAppOtp
+} = require('../services/otpDelivery');
 const { authenticate } = require('../middleware/auth');
 const router = express.Router();
 
@@ -70,14 +75,21 @@ router.post('/signup/request-otp', signupFieldsValidation, async (req, res) => {
       expiresAt: new Date(Date.now() + 10 * 60 * 1000)
     });
 
-    try {
-      await Promise.all([
-        sendEmailOtp({ email, name, otp: emailOtp }),
-        sendWhatsAppOtp({ phone: normalizedPhone, otp: phoneOtp })
-      ]);
-    } catch (deliveryError) {
+    const showOtpsOnScreen = isScreenOtpMode();
+    const deliveryResults = await Promise.allSettled([
+      sendEmailOtp({ email, name, otp: emailOtp }),
+      sendWhatsAppOtp({ phone: normalizedPhone, otp: phoneOtp })
+    ]);
+    const deliveryErrors = deliveryResults
+      .filter(result => result.status === 'rejected')
+      .map(result => result.reason?.message || 'Unknown OTP delivery error');
+
+    if (deliveryErrors.length > 0) {
+      console.warn('[Signup OTP delivery]', deliveryErrors.join(' | '));
+    }
+
+    if (!showOtpsOnScreen && deliveryErrors.length > 0) {
       await SignupVerification.deleteOne({ challengeId });
-      console.error('[Signup OTP delivery]', deliveryError.message);
       return res.status(503).json({
         message: 'Could not send verification codes. Please try again later.'
       });
@@ -86,7 +98,10 @@ router.post('/signup/request-otp', signupFieldsValidation, async (req, res) => {
     res.json({
       challengeId,
       expiresInSeconds: 600,
-      message: 'Verification codes sent to your email and WhatsApp',
+      message: showOtpsOnScreen
+        ? 'Verification codes generated. Enter the codes shown on screen.'
+        : 'Verification codes sent to your email and WhatsApp',
+      ...(showOtpsOnScreen && { screenOtps: { email: emailOtp, phone: phoneOtp } }),
       ...(isDevOtpMode() && { devOtps: { email: emailOtp, phone: phoneOtp } })
     });
   } catch (err) {

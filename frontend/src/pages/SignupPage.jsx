@@ -17,6 +17,7 @@ const SignupPage = () => {
   const [signupData, setSignupData] = useState(null);
   const [emailOtp, setEmailOtp] = useState('');
   const [phoneOtp, setPhoneOtp] = useState('');
+  const displayedOtps = challenge?.screenOtps || challenge?.devOtps;
   const { register, handleSubmit, formState: { errors } } = useForm();
 
   const getApiError = (err, fallback) =>
@@ -152,12 +153,24 @@ const SignupPage = () => {
           ) : (
             <form onSubmit={verifyAndCreateAccount} className="space-y-5">
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-                We sent separate codes to <strong>{signupData.email}</strong> and WhatsApp at <strong>{signupData.phone}</strong>. They expire in 10 minutes.
+                {displayedOtps
+                  ? 'Use the verification codes displayed below. They expire in 10 minutes.'
+                  : <>We sent separate codes to <strong>{signupData.email}</strong> and WhatsApp at <strong>{signupData.phone}</strong>. They expire in 10 minutes.</>}
               </div>
 
-              {challenge?.devOtps && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                  Local codes — email: <strong>{challenge.devOtps.email}</strong>, WhatsApp: <strong>{challenge.devOtps.phone}</strong>
+              {displayedOtps && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                  <p className="font-semibold mb-2">Your verification codes</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-lg bg-white/70 p-3 text-center">
+                      <p className="text-xs text-amber-700 mb-1">Email OTP</p>
+                      <strong className="text-xl tracking-[0.2em]">{displayedOtps.email}</strong>
+                    </div>
+                    <div className="rounded-lg bg-white/70 p-3 text-center">
+                      <p className="text-xs text-amber-700 mb-1">WhatsApp OTP</p>
+                      <strong className="text-xl tracking-[0.2em]">{displayedOtps.phone}</strong>
+                    </div>
+                  </div>
                 </div>
               )}
 

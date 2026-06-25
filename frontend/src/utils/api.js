@@ -49,6 +49,11 @@ api.interceptors.response.use(
         window.location.replace('/login');
       }
     }
+    if (!error.response && error.request) {
+      error.message = BASE_URL
+        ? `Could not reach the booking server at ${BASE_URL}. Check the backend deployment and CORS settings.`
+        : 'The production API URL is not configured. Set VITE_API_URL in the frontend deployment.';
+    }
     return Promise.reject(error);
   }
 );

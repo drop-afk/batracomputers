@@ -3,6 +3,10 @@ const nodemailer = require('nodemailer');
 const isDevOtpMode = () =>
   process.env.NODE_ENV !== 'production' && process.env.OTP_DEV_MODE === 'true';
 
+// Temporary signup mode. Set this to false once the delivery providers are ready.
+const isScreenOtpMode = () =>
+  process.env.DISPLAY_SIGNUP_OTP !== 'false';
+
 const sendEmailOtp = async ({ email, name, otp }) => {
   if (isDevOtpMode()) {
     console.log(`[DEV OTP] Email OTP for ${email}: ${otp}`);
@@ -78,4 +82,9 @@ const sendWhatsAppOtp = async ({ phone, otp }) => {
   }
 };
 
-module.exports = { isDevOtpMode, sendEmailOtp, sendWhatsAppOtp };
+module.exports = {
+  isDevOtpMode,
+  isScreenOtpMode,
+  sendEmailOtp,
+  sendWhatsAppOtp
+};

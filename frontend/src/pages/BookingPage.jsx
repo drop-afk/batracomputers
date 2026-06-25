@@ -25,8 +25,9 @@ const BookingPage = () => {
   const [files, setFiles] = useState([]);
   const [fileError, setFileError] = useState('');
   const [pageError, setPageError] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('online');
+  const [paymentMethod, setPaymentMethod] = useState('pay_on_delivery');
   const [paymentOutcome, setPaymentOutcome] = useState('confirmed');
+  const [onlinePaymentAvailable, setOnlinePaymentAvailable] = useState(false);
   const [step, setStep] = useState(1);
   const fileInputRef = useRef(null);
   const { register, handleSubmit, setValue, formState: { errors } } = useForm({
@@ -45,6 +46,16 @@ const BookingPage = () => {
       if (initial) { setSelectedService(initial); setValue('serviceId', initial._id); }
     }).catch(console.error).finally(() => setFetching(false));
   }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    api.get('/bookings/payment-config')
+      .then(res => setOnlinePaymentAvailable(Boolean(res.data?.onlinePaymentAvailable)))
+      .catch(() => {
+        setOnlinePaymentAvailable(false);
+        setPaymentMethod('pay_on_delivery');
+      });
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (serviceId && services.length > 0) {
@@ -107,9 +118,17 @@ const BookingPage = () => {
       if (data.specialRequirements) formData.append('specialRequirements', data.specialRequirements);
       files.forEach(uploadFile => formData.append('files', uploadFile));
       const res = await api.post('/bookings', formData);
-      const booking = res.data.booking;
+      // Support both the current API ({ booking, payment }) and older
+      // deployments that returned the booking document directly.
+      const booking = res.data?.booking || res.data;
+      if (!booking?._id) {
+        throw new Error('The booking server returned an invalid response. Please redeploy the backend.');
+      }
       setBookingId(booking._id);
       if (paymentMethod === 'online') {
+        if (!res.data?.payment?.keyId || !res.data?.payment?.orderId) {
+          throw new Error('Pay now is not available on the deployed backend yet. Please choose Pay on delivery or redeploy the backend with Razorpay configured.');
+        }
         try {
           const paidBooking = await openRazorpayCheckout({ booking, payment: res.data.payment });
           setPaymentOutcome(paidBooking ? 'confirmed' : 'pending');
@@ -121,7 +140,14 @@ const BookingPage = () => {
         setPaymentOutcome('confirmed');
       }
       setShowSuccess(true);
-    } catch (err) { setPageError(err.response?.data?.message || err.response?.data?.errors?.[0]?.msg || 'Failed to create booking'); }
+    } catch (err) {
+      setPageError(
+        err.response?.data?.message
+        || err.response?.data?.errors?.[0]?.msg
+        || err.message
+        || 'Failed to create booking'
+      );
+    }
     finally { setLoading(false); }
   };
 
@@ -328,13 +354,15 @@ const BookingPage = () => {
                 <h3 className="font-semibold text-gray-900">Payment Method</h3>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <button type="button" onClick={() => setPaymentMethod('online')}
-                  className={`text-left rounded-xl border p-4 transition-all ${paymentMethod === 'online' ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500/10' : 'border-gray-200 hover:border-gray-300'}`}>
+                <button type="button" onClick={() => onlinePaymentAvailable && setPaymentMethod('online')} disabled={!onlinePaymentAvailable}
+                  className={`text-left rounded-xl border p-4 transition-all ${paymentMethod === 'online' ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500/10' : 'border-gray-200 hover:border-gray-300'} disabled:cursor-not-allowed disabled:opacity-50`}>
                   <div className="flex items-center gap-3">
                     <CreditCard size={20} className={paymentMethod === 'online' ? 'text-blue-600' : 'text-gray-400'} />
                     <div>
                       <p className="text-sm font-semibold text-gray-900">Pay now</p>
-                      <p className="text-xs text-gray-500 mt-0.5">UPI, cards, netbanking and wallets</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {onlinePaymentAvailable ? 'UPI, cards, netbanking and wallets' : 'Temporarily unavailable'}
+                      </p>
                     </div>
                   </div>
                 </button>
