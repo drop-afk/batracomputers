@@ -2,10 +2,12 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../utils/api';
+import { getBookingFiles } from '../utils/bookingFiles';
 import {
   ArrowLeft, Search, Filter, CheckCircle, Clock, AlertCircle, Loader2, XCircle,
   FileText, Download, Phone, Mail, MapPin, RefreshCw
 } from 'lucide-react';
+import FrontendMessage from '../components/FrontendMessage';
 
 const statusConfig = {
   pending: { label: 'Pending', class: 'bg-amber-50 text-amber-700 border-amber-200', icon: Clock, dot: 'bg-amber-500' },
@@ -26,6 +28,8 @@ const PendingRequestsPage = () => {
   const [rejecting, setRejecting] = useState(null);
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(new Date());
+  const [rejectConfirmation, setRejectConfirmation] = useState(null);
+  const [pageError, setPageError] = useState('');
 
   const categoryKeywords = {
     photocopy: ['photocopy', 'xerox', 'copy', 'copies'],
@@ -56,17 +60,18 @@ const PendingRequestsPage = () => {
   useEffect(() => { fetchPending(); const interval = setInterval(fetchPending, 10000); return () => clearInterval(interval); }, [fetchPending]);
 
   const acceptBooking = async (id) => {
+    setPageError('');
     setAccepting(id);
     try { await api.patch(`/bookings/${id}/accept`); fetchPending(); }
-    catch (err) { alert(err.response?.data?.message || 'Failed to accept'); }
+    catch (err) { setPageError(err.response?.data?.message || 'Failed to accept'); }
     finally { setAccepting(null); }
   };
 
   const rejectBooking = async (id) => {
-    if (!window.confirm('Are you sure you want to reject this request?')) return;
+    setPageError('');
     setRejecting(id);
-    try { await api.patch(`/bookings/${id}/reject`); fetchPending(); }
-    catch (err) { alert(err.response?.data?.message || 'Failed to reject'); }
+    try { await api.patch(`/bookings/${id}/reject`); setRejectConfirmation(null); fetchPending(); }
+    catch (err) { setPageError(err.response?.data?.message || 'Failed to reject'); }
     finally { setRejecting(null); }
   };
 
@@ -77,8 +82,26 @@ const PendingRequestsPage = () => {
     return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
   };
 
+  const downloadBookingFile = (booking, fileIndex) => {
+    setPageError('');
+    const file = getBookingFiles(booking)[fileIndex];
+    const token = localStorage.getItem('token');
+    fetch(`${import.meta.env.VITE_API_URL || '/api'}/bookings/${booking._id}/file/${fileIndex}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.blob())
+      .then(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = file?.originalName || 'document.pdf';
+        a.click();
+        URL.revokeObjectURL(url);
+      })
+      .catch(() => setPageError('Failed to download'));
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <FrontendMessage message={pageError} onDismiss={() => setPageError('')} />
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div className="flex items-center gap-3">
@@ -146,9 +169,9 @@ const PendingRequestsPage = () => {
                   {booking.specialRequirements && (
                     <p className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded mt-2 inline-block">{booking.specialRequirements}</p>
                   )}
-                  {booking.fileUrl && (
+                  {getBookingFiles(booking).length > 0 && (
                     <div className="mt-2 inline-flex items-center gap-1.5 text-xs text-blue-700 bg-blue-50 px-2 py-1 rounded border border-blue-100">
-                      <FileText size={10} /> PDF attached
+                      <FileText size={10} /> {getBookingFiles(booking).length} PDF{getBookingFiles(booking).length !== 1 ? 's' : ''} attached
                     </div>
                   )}
                 </div>
@@ -161,7 +184,7 @@ const PendingRequestsPage = () => {
               </div>
               <div className="flex gap-2 mt-4">
                 <button onClick={() => setSelectedBooking(booking)} className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 bg-gray-50 border border-gray-200 hover:bg-gray-100 transition-colors">View Details</button>
-                <button onClick={() => rejectBooking(booking._id)} disabled={rejecting === booking._id || accepting === booking._id}
+                <button onClick={() => setRejectConfirmation(booking)} disabled={rejecting === booking._id || accepting === booking._id}
                   className="px-4 py-2 rounded-xl text-xs font-semibold text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 transition-colors disabled:opacity-50">
                   {rejecting === booking._id ? 'Rejecting...' : 'Reject'}
                 </button>
@@ -202,23 +225,39 @@ const PendingRequestsPage = () => {
                   <p className="text-sm text-amber-800">{selectedBooking.specialRequirements}</p>
                 </div>
               )}
-              {selectedBooking.fileUrl && (
-                <button onClick={() => {
-                  const token = localStorage.getItem('token');
-                  fetch(`${import.meta.env.VITE_API_URL || '/api'}/bookings/${selectedBooking._id}/file`, { headers: { Authorization: `Bearer ${token}` } })
-                    .then(r => r.blob()).then(blob => { const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = selectedBooking.fileOriginalName || 'document.pdf'; a.click(); URL.revokeObjectURL(url); })
-                    .catch(() => alert('Failed to download'));
-                }} className="w-full flex items-center justify-center gap-2 bg-blue-50 text-blue-700 border border-blue-200 py-2.5 rounded-xl text-sm font-medium hover:bg-blue-100 transition-colors">
-                  <Download size={14} /><FileText size={14} /> Download PDF
-                </button>
+              {getBookingFiles(selectedBooking).length > 0 && (
+                <div className="space-y-2">
+                  {getBookingFiles(selectedBooking).map((file, index) => (
+                    <button key={`${file.url || file.originalName}-${index}`} onClick={() => downloadBookingFile(selectedBooking, index)} className="w-full flex items-center justify-center gap-2 bg-blue-50 text-blue-700 border border-blue-200 py-2.5 rounded-xl text-sm font-medium hover:bg-blue-100 transition-colors">
+                      <Download size={14} /><FileText size={14} /> Download {file.originalName || `PDF ${index + 1}`}
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
             <div className="p-6 border-t border-gray-50 flex gap-3">
               <button onClick={() => setSelectedBooking(null)} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-600 bg-gray-50 hover:bg-gray-100 transition-colors">Close</button>
-              <button onClick={() => { rejectBooking(selectedBooking._id); setSelectedBooking(null); }} disabled={rejecting === selectedBooking._id}
+              <button onClick={() => { setRejectConfirmation(selectedBooking); setSelectedBooking(null); }} disabled={rejecting === selectedBooking._id}
                 className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-red-700 bg-red-50 hover:bg-red-100 transition-colors disabled:opacity-50">Reject</button>
               <button onClick={() => { acceptBooking(selectedBooking._id); setSelectedBooking(null); }} disabled={accepting === selectedBooking._id}
                 className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors disabled:opacity-50">Accept</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {rejectConfirmation && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl">
+            <h3 className="text-lg font-bold text-gray-900 mb-1">Reject this request?</h3>
+            <p className="text-sm text-gray-500 mb-5">
+              Reject <strong>{rejectConfirmation.serviceName}</strong> for {rejectConfirmation.customerName}? This action cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setRejectConfirmation(null)} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-600 bg-gray-50 hover:bg-gray-100 transition-colors">Cancel</button>
+              <button onClick={() => rejectBooking(rejectConfirmation._id)} disabled={rejecting === rejectConfirmation._id} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors disabled:opacity-50">
+                {rejecting === rejectConfirmation._id ? 'Rejecting...' : 'Yes, Reject'}
+              </button>
             </div>
           </div>
         </div>

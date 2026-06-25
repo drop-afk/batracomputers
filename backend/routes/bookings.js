@@ -44,6 +44,29 @@ const fileFilter = (req, file, cb) => {
 
 const upload = multer({ storage, fileFilter, limits: { fileSize: 10 * 1024 * 1024 } });
 
+const getUploadedFiles = (req) => {
+  if (Array.isArray(req.files)) return req.files;
+  return [
+    ...(req.files?.files || []),
+    ...(req.files?.file || [])
+  ];
+};
+
+const getBookingFiles = (booking) => {
+  if (booking.files?.length) return booking.files;
+  if (!booking.fileUrl) return [];
+  return [{
+    url: booking.fileUrl,
+    name: booking.fileName || path.basename(booking.fileUrl),
+    originalName: booking.fileOriginalName || 'document.pdf',
+    downloaded: booking.fileDownloaded
+  }];
+};
+
+const cleanupUploadedFiles = (files = []) => {
+  files.forEach(file => fs.unlink(file.path, () => {}));
+};
+
 // Validation helper
 const validate = (req, res, next) => {
   const errors = validationResult(req);
@@ -52,7 +75,10 @@ const validate = (req, res, next) => {
 };
 
 // POST /bookings — requires auth; handles optional file upload (Issue #28)
-router.post('/', authenticate, upload.single('file'), [
+router.post('/', authenticate, upload.fields([
+  { name: 'files', maxCount: 5 },
+  { name: 'file', maxCount: 1 }
+]), [
   body('customerName').trim().notEmpty().withMessage('Name is required'),
   body('customerEmail').isEmail().normalizeEmail().withMessage('Valid email is required'),
   body('customerPhone')
@@ -67,6 +93,7 @@ router.post('/', authenticate, upload.single('file'), [
 ], validate, async (req, res) => {
   try {
     const { customerName, customerEmail, customerPhone, serviceId, quantity, specialRequirements, preferredDeadline } = req.body;
+    const uploadedFiles = getUploadedFiles(req);
 
     const service = await Service.findById(serviceId);
     if (!service || !service.isActive) return res.status(404).json({ message: 'Service not found or inactive' });
@@ -99,19 +126,33 @@ router.post('/', authenticate, upload.single('file'), [
       status: 'pending'
     };
 
-    // Validate PDF magic bytes if a file was uploaded
-    if (req.file) {
-      if (!validatePdfMagicBytes(req.file.path)) {
-        fs.unlink(req.file.path, () => {});
-        return res.status(400).json({ message: 'Invalid PDF file — file content does not match PDF format' });
+    if (uploadedFiles.length > 5) {
+      cleanupUploadedFiles(uploadedFiles);
+      return res.status(400).json({ message: 'You can upload up to 5 PDF files per booking' });
+    }
+
+    // Validate PDF magic bytes if files were uploaded
+    if (uploadedFiles.length > 0) {
+      for (const uploadedFile of uploadedFiles) {
+        if (!validatePdfMagicBytes(uploadedFile.path)) {
+          cleanupUploadedFiles(uploadedFiles);
+          return res.status(400).json({ message: 'Invalid PDF file - file content does not match PDF format' });
+        }
       }
-      bookingData.fileUrl = `/uploads/bookings/${req.file.filename}`;
-      bookingData.fileName = req.file.filename;
-      bookingData.fileOriginalName = req.file.originalname;
+
+      bookingData.files = uploadedFiles.map(uploadedFile => ({
+        url: `/uploads/bookings/${uploadedFile.filename}`,
+        name: uploadedFile.filename,
+        originalName: uploadedFile.originalname,
+        downloaded: false
+      }));
+      bookingData.fileUrl = bookingData.files[0].url;
+      bookingData.fileName = bookingData.files[0].name;
+      bookingData.fileOriginalName = bookingData.files[0].originalName;
     }
 
     // Photocopy and printing services require a PDF upload
-    if (['photocopy', 'printing'].includes(service.category) && !req.file) {
+    if (['photocopy', 'printing'].includes(service.category) && uploadedFiles.length === 0) {
       return res.status(400).json({ message: 'A PDF file is required for photocopy and printing services' });
     }
 
@@ -120,10 +161,8 @@ router.post('/', authenticate, upload.single('file'), [
     res.status(201).json(booking);
   } catch (err) {
     console.error('Booking creation error:', err);
-    // Clean up uploaded file if booking failed
-    if (req.file) {
-      fs.unlink(req.file.path, () => {});
-    }
+    // Clean up uploaded files if booking failed
+    cleanupUploadedFiles(getUploadedFiles(req));
     res.status(500).json({ message: 'Server error creating booking' });
   }
 });
@@ -209,14 +248,21 @@ router.get('/:id', authenticate, async (req, res) => {
 });
 
 // GET /bookings/:id/file — download attached PDF (worker/owner/customer of booking only)
-router.get('/:id/file', authenticate, async (req, res) => {
+router.get('/:id/file/:fileIndex?', authenticate, async (req, res) => {
   try {
     if (!Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ message: 'Invalid booking ID' });
     }
     const booking = await Booking.findById(req.params.id);
     if (!booking) return res.status(404).json({ message: 'Booking not found' });
-    if (!booking.fileUrl) return res.status(404).json({ message: 'No file attached to this booking' });
+    const bookingFiles = getBookingFiles(booking);
+    if (bookingFiles.length === 0) return res.status(404).json({ message: 'No file attached to this booking' });
+
+    const fileIndex = req.params.fileIndex === undefined ? 0 : Number(req.params.fileIndex);
+    if (!Number.isInteger(fileIndex) || fileIndex < 0 || fileIndex >= bookingFiles.length) {
+      return res.status(404).json({ message: 'File not found for this booking' });
+    }
+    const selectedFile = bookingFiles[fileIndex];
 
     const isOwner = req.user.role === 'owner';
     const isCustomer = booking.customerId?.toString() === req.user._id.toString();
@@ -231,18 +277,23 @@ router.get('/:id/file', authenticate, async (req, res) => {
 
     // Resolve the file path and prevent path traversal (Security)
     const uploadsBase = path.resolve(__dirname, '..', 'uploads', 'bookings');
-    const filePath = path.resolve(__dirname, '..', booking.fileUrl.replace(/^\//, ''));
+    const filePath = path.resolve(__dirname, '..', selectedFile.url.replace(/^\//, ''));
     if (!filePath.startsWith(uploadsBase)) {
       return res.status(403).json({ message: 'Invalid file path' });
     }
 
     // Track that the assigned worker has downloaded the file
-    if (isAssignedWorker && !booking.fileDownloaded) {
-      booking.fileDownloaded = true;
+    if (isAssignedWorker && !selectedFile.downloaded) {
+      if (booking.files?.length) {
+        booking.files[fileIndex].downloaded = true;
+        booking.fileDownloaded = booking.files.every(file => file.downloaded);
+      } else {
+        booking.fileDownloaded = true;
+      }
       await booking.save();
     }
 
-    res.download(filePath, booking.fileOriginalName || 'document.pdf');
+    res.download(filePath, selectedFile.originalName || 'document.pdf');
   } catch (err) {
     res.status(500).json({ message: 'Server error downloading file' });
   }
@@ -334,9 +385,11 @@ router.patch('/:id/status', authenticate, authorize('worker', 'owner'), [
       return res.status(400).json({ message: `Cannot transition from '${booking.status}' to '${status}'` });
     }
 
-    // If marking as completed and there's a file attached, enforce that it was downloaded first
-    if (status === 'completed' && booking.fileUrl && !booking.fileDownloaded) {
-      return res.status(400).json({ message: 'You must download the attached PDF before marking this task as complete' });
+    // If marking as completed and files are attached, enforce that all were downloaded first
+    const bookingFiles = getBookingFiles(booking);
+    const allFilesDownloaded = bookingFiles.length === 0 || bookingFiles.every(file => file.downloaded);
+    if (status === 'completed' && bookingFiles.length > 0 && !allFilesDownloaded) {
+      return res.status(400).json({ message: 'You must download all attached PDFs before marking this task as complete' });
     }
 
     booking.status = status;

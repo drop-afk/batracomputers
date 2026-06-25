@@ -2,10 +2,12 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../utils/api';
+import { areAllBookingFilesDownloaded, getBookingFiles, getFileDownloadKey } from '../utils/bookingFiles';
 import {
   ClipboardList, CheckCircle, Clock, AlertCircle, Star, RefreshCw,
   TrendingUp, ArrowRight, Package, Zap, Timer, Download, FileText
 } from 'lucide-react';
+import FrontendMessage from '../components/FrontendMessage';
 
 const statusConfig = {
   pending:     { label: 'New Request',   cls: 'bg-amber-50 text-amber-700 border-amber-200',     icon: Clock,         dot: 'bg-amber-500' },
@@ -27,6 +29,7 @@ const WorkerDashboard = () => {
   const [confirmAccept, setConfirmAccept] = useState(null);
   const [downloadedFiles, setDownloadedFiles] = useState(new Set());
   const [lastUpdated, setLastUpdated] = useState(new Date());
+  const [pageError, setPageError] = useState('');
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -56,16 +59,18 @@ const WorkerDashboard = () => {
   }, [fetchDashboard]);
 
   const acceptBooking = async (id) => {
+    setPageError('');
     setAccepting(id);
     try { await api.patch(`/bookings/${id}/accept`); fetchDashboard(); }
-    catch (err) { alert(err.response?.data?.message || 'Failed to accept'); }
+    catch (err) { setPageError(err.response?.data?.message || 'Failed to accept'); }
     finally { setAccepting(null); setConfirmAccept(null); }
   };
 
   const updateStatus = async (id, status) => {
+    setPageError('');
     setUpdating(id);
     try { await api.patch(`/bookings/${id}/status`, { status }); fetchDashboard(); if (status === 'completed') setConfirmComplete(null); }
-    catch (err) { alert(err.response?.data?.message || 'Failed to update'); }
+    catch (err) { setPageError(err.response?.data?.message || 'Failed to update'); }
     finally { setUpdating(null); }
   };
 
@@ -80,8 +85,29 @@ const WorkerDashboard = () => {
     return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
   };
 
+  const downloadTaskFile = (task, fileIndex) => {
+    setPageError('');
+    const file = getBookingFiles(task)[fileIndex];
+    const token = localStorage.getItem('token');
+    fetch(`${import.meta.env.VITE_API_URL || '/api'}/bookings/${task._id}/file/${fileIndex}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(r => r.blob())
+      .then(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = file?.originalName || 'document.pdf';
+        a.click();
+        URL.revokeObjectURL(url);
+        setDownloadedFiles(prev => new Set(prev).add(getFileDownloadKey(task._id, fileIndex)));
+      })
+      .catch(() => setPageError('Failed to download file'));
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <FrontendMessage message={pageError} onDismiss={() => setPageError('')} />
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
         <div>
@@ -189,14 +215,14 @@ const WorkerDashboard = () => {
                           )}
                           {t.status === 'in_progress' && (
                             <div className="flex flex-col items-end gap-2">
-                              {t.fileUrl && !t.fileDownloaded && !downloadedFiles.has(t._id) && (
+                              {getBookingFiles(t).length > 0 && !areAllBookingFilesDownloaded(t, downloadedFiles) && (
                                 <span className="text-[10px] text-red-600 bg-red-50 px-2 py-1 rounded border border-red-100 flex items-center gap-1">
-                                  <AlertCircle size={9} /> Download PDF first
+                                  <AlertCircle size={9} /> Download PDFs first
                                 </span>
                               )}
                               <button
                                 onClick={() => setConfirmComplete(t)}
-                                disabled={t.fileUrl && !t.fileDownloaded && !downloadedFiles.has(t._id)}
+                                disabled={getBookingFiles(t).length > 0 && !areAllBookingFilesDownloaded(t, downloadedFiles)}
                                 className="text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                               >
                                 <CheckCircle size={10} className="inline mr-1" /> Mark Done
@@ -205,29 +231,18 @@ const WorkerDashboard = () => {
                           )}
                         </div>
                       </div>
-                      {t.fileUrl && t.status === 'in_progress' && (
-                        <button
-                          onClick={() => {
-                            const token = localStorage.getItem('token');
-                            fetch(`${import.meta.env.VITE_API_URL || '/api'}/bookings/${t._id}/file`, {
-                              headers: { Authorization: `Bearer ${token}` }
-                            })
-                              .then(r => r.blob())
-                              .then(blob => {
-                                const url = URL.createObjectURL(blob);
-                                const a = document.createElement('a');
-                                a.href = url;
-                                a.download = t.fileOriginalName || 'document.pdf';
-                                a.click();
-                                URL.revokeObjectURL(url);
-                                setDownloadedFiles(prev => new Set(prev).add(t._id));
-                              })
-                              .catch(() => alert('Failed to download file'));
-                          }}
-                          className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors"
-                        >
-                          <Download size={12} /><FileText size={12} /> Download PDF
-                        </button>
+                      {getBookingFiles(t).length > 0 && t.status === 'in_progress' && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {getBookingFiles(t).map((file, index) => (
+                            <button
+                              key={`${file.url || file.originalName}-${index}`}
+                              onClick={() => downloadTaskFile(t, index)}
+                              className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors"
+                            >
+                              <Download size={12} /><FileText size={12} /> PDF {index + 1}
+                            </button>
+                          ))}
+                        </div>
                       )}
                     </div>
                   );
@@ -321,16 +336,16 @@ const WorkerDashboard = () => {
             <p className="text-sm text-gray-500 text-center mb-5">
               Confirm completion of <strong>{confirmComplete.serviceName}</strong>
             </p>
-            {confirmComplete.fileUrl && !confirmComplete.fileDownloaded && !downloadedFiles.has(confirmComplete._id) && (
+            {getBookingFiles(confirmComplete).length > 0 && !areAllBookingFilesDownloaded(confirmComplete, downloadedFiles) && (
               <p className="text-xs text-red-600 bg-red-50 p-2 rounded-lg mb-4 border border-red-100 text-center flex items-center justify-center gap-1">
-                <AlertCircle size={11} /> Download the PDF before completing
+                <AlertCircle size={11} /> Download all PDFs before completing
               </p>
             )}
             <div className="flex gap-3">
               <button onClick={() => setConfirmComplete(null)} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-600 bg-gray-50 hover:bg-gray-100 transition-colors">Cancel</button>
               <button
                 onClick={() => updateStatus(confirmComplete._id, 'completed')}
-                disabled={updating === confirmComplete._id || (confirmComplete.fileUrl && !confirmComplete.fileDownloaded && !downloadedFiles.has(confirmComplete._id))}
+                disabled={updating === confirmComplete._id || (getBookingFiles(confirmComplete).length > 0 && !areAllBookingFilesDownloaded(confirmComplete, downloadedFiles))}
                 className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors disabled:opacity-40"
               >
                 {updating === confirmComplete._id ? 'Completing...' : 'Yes, Done'}

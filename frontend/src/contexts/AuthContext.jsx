@@ -38,8 +38,13 @@ export const AuthProvider = ({ children }) => {
     return res.data.user;
   };
 
-  const signup = async (data) => {
-    const res = await api.post('/auth/signup', data);
+  const requestSignupOtp = async (data) => {
+    const res = await api.post('/auth/signup/request-otp', data);
+    return res.data;
+  };
+
+  const signup = async (data, verification) => {
+    const res = await api.post('/auth/signup', { ...data, ...verification });
     localStorage.setItem('token', res.data.token);
     localStorage.setItem('user', JSON.stringify(res.data.user));
     setUser(res.data.user);
@@ -56,7 +61,7 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, login, signup, logout, loading, isAuthenticated: !!user }}>
+    <AuthContext.Provider value={{ user, login, requestSignupOtp, signup, logout, loading, isAuthenticated: !!user }}>
       {children}
     </AuthContext.Provider>
   );

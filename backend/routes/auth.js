@@ -1,49 +1,171 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
+const SignupVerification = require('../models/SignupVerification');
+const { isDevOtpMode, sendEmailOtp, sendWhatsAppOtp } = require('../services/otpDelivery');
 const { authenticate } = require('../middleware/auth');
 const router = express.Router();
 
-const generateToken = (userId) => {
-  return jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRE || '7d' });
-};
+const generateToken = (userId) =>
+  jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRE || '7d' });
 
-// POST /auth/signup
-// FIXED Issue #2: Role is always forced to 'customer' — no client can self-assign 'worker' or 'owner'
-router.post('/signup', [
+const signupFieldsValidation = [
   body('name').trim().notEmpty().withMessage('Name is required'),
   body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
   body('phone')
     .trim().notEmpty().withMessage('Phone is required')
-    .matches(/^[+\d\s\-()]{7,15}$/).withMessage('Invalid phone number'),
+    .matches(/^[+\d\s\-()]{7,18}$/).withMessage('Invalid phone number'),
   body('password')
     .isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
-    .matches(/\d/).withMessage('Password must contain at least one number'),
-], async (req, res) => {
+    .matches(/\d/).withMessage('Password must contain at least one number')
+];
+
+const normalizePhone = (phone) => {
+  const digits = String(phone).replace(/\D/g, '');
+  if (digits.length === 10) return `+91${digits}`;
+  if (digits.length === 12 && digits.startsWith('91')) return `+${digits}`;
+  return `+${digits}`;
+};
+
+const generateOtp = () => crypto.randomInt(100000, 1000000).toString();
+
+// Send separate codes to the supplied email address and WhatsApp number.
+router.post('/signup/request-otp', signupFieldsValidation, async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { name, email, phone, password } = req.body;
+    const normalizedPhone = normalizePhone(phone);
+    if (!/^\+\d{8,15}$/.test(normalizedPhone)) {
+      return res.status(400).json({ message: 'Enter a valid phone number with country code' });
+    }
 
-    // Always default to 'customer' — workers/owners are created by admin only (Issue #2)
-    const role = 'customer';
+    const existingUser = await User.findOne({ $or: [{ email }, { phone: normalizedPhone }] });
+    if (existingUser) {
+      return res.status(400).json({
+        message: existingUser.email === email
+          ? 'User already exists with this email'
+          : 'User already exists with this phone number'
+      });
+    }
 
-    const existingUser = await User.findOne({ email });
-    if (existingUser) return res.status(400).json({ message: 'User already exists with this email' });
+    // A resend invalidates all older codes for this email or phone.
+    await SignupVerification.deleteMany({ $or: [{ email }, { phone: normalizedPhone }] });
 
-    const user = new User({ name, email, phone, password, role });
+    const emailOtp = generateOtp();
+    const phoneOtp = generateOtp();
+    const challengeId = crypto.randomUUID();
+    await SignupVerification.create({
+      challengeId,
+      name,
+      email,
+      phone: normalizedPhone,
+      passwordHash: await bcrypt.hash(password, 10),
+      emailOtpHash: await bcrypt.hash(emailOtp, 10),
+      phoneOtpHash: await bcrypt.hash(phoneOtp, 10),
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+    });
+
+    try {
+      await Promise.all([
+        sendEmailOtp({ email, name, otp: emailOtp }),
+        sendWhatsAppOtp({ phone: normalizedPhone, otp: phoneOtp })
+      ]);
+    } catch (deliveryError) {
+      await SignupVerification.deleteOne({ challengeId });
+      console.error('[Signup OTP delivery]', deliveryError.message);
+      return res.status(503).json({
+        message: 'Could not send verification codes. Please try again later.'
+      });
+    }
+
+    res.json({
+      challengeId,
+      expiresInSeconds: 600,
+      message: 'Verification codes sent to your email and WhatsApp',
+      ...(isDevOtpMode() && { devOtps: { email: emailOtp, phone: phoneOtp } })
+    });
+  } catch (err) {
+    console.error('[Signup OTP request]', err);
+    res.status(500).json({ message: 'Server error while sending verification codes' });
+  }
+});
+
+// Verify both codes before creating the customer account.
+router.post('/signup', [
+  ...signupFieldsValidation,
+  body('challengeId').isUUID().withMessage('Invalid verification request'),
+  body('emailOtp').matches(/^\d{6}$/).withMessage('Enter the 6-digit email code'),
+  body('phoneOtp').matches(/^\d{6}$/).withMessage('Enter the 6-digit phone code')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const { name, email, phone, password, challengeId, emailOtp, phoneOtp } = req.body;
+    const normalizedPhone = normalizePhone(phone);
+    const verification = await SignupVerification.findOne({ challengeId });
+
+    if (!verification || verification.expiresAt <= new Date()) {
+      return res.status(400).json({ message: 'Verification codes expired. Please request new codes.' });
+    }
+    if (verification.attemptsRemaining <= 0) {
+      return res.status(429).json({ message: 'Too many incorrect attempts. Please request new codes.' });
+    }
+    if (
+      verification.email !== email ||
+      verification.phone !== normalizedPhone ||
+      verification.name !== name
+    ) {
+      return res.status(400).json({ message: 'Account details changed. Please request new codes.' });
+    }
+
+    const [emailMatches, phoneMatches, passwordMatches] = await Promise.all([
+      bcrypt.compare(emailOtp, verification.emailOtpHash),
+      bcrypt.compare(phoneOtp, verification.phoneOtpHash),
+      bcrypt.compare(password, verification.passwordHash)
+    ]);
+    if (!passwordMatches) {
+      return res.status(400).json({ message: 'Account details changed. Please request new codes.' });
+    }
+    if (!emailMatches || !phoneMatches) {
+      verification.attemptsRemaining -= 1;
+      await verification.save();
+      return res.status(400).json({
+        message: `Incorrect verification code. ${verification.attemptsRemaining} attempt(s) remaining.`
+      });
+    }
+
+    const existingUser = await User.findOne({ $or: [{ email }, { phone: normalizedPhone }] });
+    if (existingUser) {
+      await SignupVerification.deleteOne({ challengeId });
+      return res.status(400).json({ message: 'An account already exists with this email or phone number' });
+    }
+
+    const user = new User({
+      name,
+      email,
+      phone: normalizedPhone,
+      password,
+      role: 'customer',
+      emailVerified: true,
+      phoneVerified: true
+    });
     await user.save();
+    await SignupVerification.deleteOne({ challengeId });
 
     const token = generateToken(user._id);
     res.status(201).json({ token, user });
   } catch (err) {
+    console.error('[Signup verification]', err);
     res.status(500).json({ message: 'Server error during signup' });
   }
 });
 
-// POST /auth/login
 router.post('/login', [
   body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
   body('password').notEmpty().withMessage('Password is required')
@@ -55,8 +177,6 @@ router.post('/login', [
     const { email, password } = req.body;
     const user = await User.findOne({ email }).select('+password');
     if (!user) return res.status(400).json({ message: 'Invalid credentials' });
-
-    // Prevent deactivated accounts from logging in (Security)
     if (!user.isActive) {
       return res.status(403).json({ message: 'Account has been deactivated. Please contact admin.' });
     }
@@ -65,14 +185,12 @@ router.post('/login', [
     if (!isMatch) return res.status(400).json({ message: 'Invalid credentials' });
 
     const token = generateToken(user._id);
-    // Return user without password (toJSON handles this)
     res.json({ token, user });
   } catch (err) {
     res.status(500).json({ message: 'Server error during login' });
   }
 });
 
-// GET /auth/me — return only safe fields (Issue #9)
 router.get('/me', authenticate, async (req, res) => {
   res.json({
     _id: req.user._id,
@@ -87,7 +205,6 @@ router.get('/me', authenticate, async (req, res) => {
   });
 });
 
-// POST /auth/logout (client-side token removal is primary mechanism)
 router.post('/logout', authenticate, async (req, res) => {
   res.json({ message: 'Logged out successfully' });
 });

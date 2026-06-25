@@ -7,6 +7,7 @@ import {
   ArrowDownCircle, FileCheck, AlertTriangle, ChevronRight, Shield, Eye, Search, Filter,
   ChevronDown, ChevronUp, Calendar, Phone, Mail, MapPin, Zap, ArrowLeft, RefreshCw
 } from 'lucide-react';
+import FrontendMessage from '../components/FrontendMessage';
 
 const AdminPanel = () => {
   const { user } = useAuth();
@@ -27,6 +28,8 @@ const AdminPanel = () => {
   const [bookingFilter, setBookingFilter] = useState('all');
   const [expandedWorker, setExpandedWorker] = useState(null);
   const [selectedWorker, setSelectedWorker] = useState(null);
+  const [serviceToDeactivate, setServiceToDeactivate] = useState(null);
+  const [pageError, setPageError] = useState('');
 
   useEffect(() => { fetchAll(); }, []);
 
@@ -50,28 +53,31 @@ const AdminPanel = () => {
   };
 
   const saveService = async () => {
+    setPageError('');
     try {
       if (editingService) { await api.put(`/services/${editingService._id}`, serviceForm); }
       else { await api.post('/services', serviceForm); }
       setShowServiceForm(false); setEditingService(null); setServiceForm({ name: '', description: '', category: 'photocopy', basePrice: '', priceUnit: 'flat rate', estimatedTime: '15 mins', isActive: true });
       fetchAll();
-    } catch (err) { alert(err.response?.data?.message || 'Failed to save service'); }
+    } catch (err) { setPageError(err.response?.data?.message || 'Failed to save service'); }
   };
 
   const deleteService = async (id) => {
-    if (!confirm('Deactivate this service?')) return;
-    try { await api.delete(`/services/${id}`); fetchAll(); }
-    catch (err) { alert(err.response?.data?.message || 'Failed to delete service'); }
+    setPageError('');
+    try { await api.delete(`/services/${id}`); setServiceToDeactivate(null); fetchAll(); }
+    catch (err) { setPageError(err.response?.data?.message || 'Failed to deactivate service'); }
   };
 
   const addWorker = async () => {
+    setPageError('');
     try { await api.post('/users/workers', workerForm); setShowWorkerForm(false); setWorkerForm({ name: '', email: '', phone: '', password: '' }); fetchAll(); }
-    catch (err) { alert(err.response?.data?.message || 'Failed to add worker'); }
+    catch (err) { setPageError(err.response?.data?.message || 'Failed to add worker'); }
   };
 
   const toggleWorker = async (id, isActive) => {
+    setPageError('');
     try { await api.patch(`/users/${id}`, { isActive: !isActive }); fetchAll(); }
-    catch (err) { alert('Failed to update worker'); }
+    catch (err) { setPageError(err.response?.data?.message || 'Failed to update worker'); }
   };
 
   const tabs = [
@@ -105,6 +111,7 @@ const AdminPanel = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <FrontendMessage message={pageError} onDismiss={() => setPageError('')} />
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
         <div className="flex items-center gap-3">
@@ -366,7 +373,7 @@ const AdminPanel = () => {
                         className="flex-1 bg-gray-50 text-gray-700 py-2 rounded-xl text-xs font-medium hover:bg-gray-100 transition-colors flex items-center justify-center gap-1">
                         <Pencil size={12} /> Edit
                       </button>
-                      <button onClick={() => deleteService(s._id)} className="flex-1 bg-red-50 text-red-700 py-2 rounded-xl text-xs font-medium hover:bg-red-100 transition-colors flex items-center justify-center gap-1">
+                      <button onClick={() => setServiceToDeactivate(s)} className="flex-1 bg-red-50 text-red-700 py-2 rounded-xl text-xs font-medium hover:bg-red-100 transition-colors flex items-center justify-center gap-1">
                         <Trash2 size={12} /> Deactivate
                       </button>
                     </div>
@@ -445,6 +452,21 @@ const AdminPanel = () => {
             </div>
           )}
         </>
+      )}
+
+      {serviceToDeactivate && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl">
+            <h3 className="text-lg font-bold text-gray-900 mb-1">Deactivate service?</h3>
+            <p className="text-sm text-gray-500 mb-5">
+              <strong>{serviceToDeactivate.name}</strong> will no longer be available for new bookings.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setServiceToDeactivate(null)} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-600 bg-gray-50 hover:bg-gray-100 transition-colors">Cancel</button>
+              <button onClick={() => deleteService(serviceToDeactivate._id)} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors">Deactivate</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Service Form Modal */}

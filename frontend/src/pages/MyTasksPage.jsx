@@ -2,10 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../utils/api';
+import { areAllBookingFilesDownloaded, getBookingFiles, getFileDownloadKey } from '../utils/bookingFiles';
 import {
   ArrowLeft, CheckCircle, Clock, AlertCircle, Star, Loader2, XCircle,
   Filter, Package, Search, Download, FileText, IndianRupee, Eye, Zap
 } from 'lucide-react';
+import FrontendMessage from '../components/FrontendMessage';
 
 const statusConfig = {
   pending:     { label: 'Pending',     class: 'bg-amber-50 text-amber-700 border-amber-200',     icon: Clock,         dot: 'bg-amber-500' },
@@ -27,6 +29,7 @@ const MyTasksPage = () => {
   const [newCost, setNewCost] = useState('');
   const [downloadedFiles, setDownloadedFiles] = useState(new Set());
   const [selectedTask, setSelectedTask] = useState(null);
+  const [pageError, setPageError] = useState('');
 
   useEffect(() => { fetchTasks(); }, []);
 
@@ -37,15 +40,29 @@ const MyTasksPage = () => {
   };
 
   const updateStatus = async (id, status) => {
+    setPageError('');
     setUpdating(id);
     try { await api.patch(`/bookings/${id}/status`, { status }); fetchTasks(); if (status === 'completed') setConfirmComplete(null); }
-    catch (err) { alert(err.response?.data?.message || 'Failed to update'); }
+    catch (err) { setPageError(err.response?.data?.message || 'Failed to update'); }
     finally { setUpdating(null); }
   };
 
   const saveFinalCost = async (id) => {
+    setPageError('');
     try { await api.patch(`/bookings/${id}/final-cost`, { finalCost: Number(newCost) }); setCostEdit(null); fetchTasks(); }
-    catch (err) { alert(err.response?.data?.message || 'Failed to update cost'); }
+    catch (err) { setPageError(err.response?.data?.message || 'Failed to update cost'); }
+  };
+
+  const downloadTaskFile = (task, fileIndex) => {
+    setPageError('');
+    const file = getBookingFiles(task)[fileIndex];
+    const token = localStorage.getItem('token');
+    fetch(`${import.meta.env.VITE_API_URL || '/api'}/bookings/${task._id}/file/${fileIndex}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.blob()).then(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = file?.originalName || 'document.pdf'; a.click(); URL.revokeObjectURL(url);
+        setDownloadedFiles(prev => new Set(prev).add(getFileDownloadKey(task._id, fileIndex)));
+      }).catch(() => setPageError('Failed to download'));
   };
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -71,6 +88,7 @@ const MyTasksPage = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <FrontendMessage message={pageError} onDismiss={() => setPageError('')} />
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
         <Link to="/dashboard" className="p-2 rounded-lg bg-white border border-gray-200 text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-all">
@@ -183,25 +201,22 @@ const MyTasksPage = () => {
                 </div>
 
                 {/* PDF Download */}
-                {task.fileUrl && (
-                  <button
-                    onClick={() => {
-                      const token = localStorage.getItem('token');
-                      fetch(`${import.meta.env.VITE_API_URL || '/api'}/bookings/${task._id}/file`, { headers: { Authorization: `Bearer ${token}` } })
-                        .then(r => r.blob()).then(blob => {
-                          const url = URL.createObjectURL(blob);
-                          const a = document.createElement('a'); a.href = url; a.download = task.fileOriginalName || 'document.pdf'; a.click(); URL.revokeObjectURL(url);
-                          setDownloadedFiles(prev => new Set(prev).add(task._id));
-                        }).catch(() => alert('Failed to download'));
-                    }}
-                    className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors"
-                  >
-                    <Download size={12} /><FileText size={12} /> Download PDF
-                  </button>
+                {getBookingFiles(task).length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {getBookingFiles(task).map((file, index) => (
+                      <button
+                        key={`${file.url || file.originalName}-${index}`}
+                        onClick={() => downloadTaskFile(task, index)}
+                        className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors"
+                      >
+                        <Download size={12} /><FileText size={12} /> PDF {index + 1}
+                      </button>
+                    ))}
+                  </div>
                 )}
-                {task.fileUrl && task.status === 'in_progress' && !task.fileDownloaded && !downloadedFiles.has(task._id) && (
+                {getBookingFiles(task).length > 0 && task.status === 'in_progress' && !areAllBookingFilesDownloaded(task, downloadedFiles) && (
                   <p className="text-xs text-red-600 bg-red-50 px-2 py-1 rounded mt-2 inline-flex items-center gap-1 border border-red-100">
-                    <AlertCircle size={10} /> Download required before completing
+                    <AlertCircle size={10} /> Download all PDFs before completing
                   </p>
                 )}
 
@@ -215,7 +230,7 @@ const MyTasksPage = () => {
                   )}
                   {task.status === 'in_progress' && (
                     <button onClick={() => setConfirmComplete(task)}
-                      disabled={task.fileUrl && !task.fileDownloaded && !downloadedFiles.has(task._id)}
+                      disabled={getBookingFiles(task).length > 0 && !areAllBookingFilesDownloaded(task, downloadedFiles)}
                       className="flex-1 text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 py-2 rounded-lg hover:bg-emerald-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5">
                       <CheckCircle size={12} /> Mark Complete
                     </button>
@@ -261,20 +276,18 @@ const MyTasksPage = () => {
                   <p className="text-sm text-amber-800">{selectedTask.specialRequirements}</p>
                 </div>
               )}
-              {selectedTask.fileUrl && (
-                <button
-                  onClick={() => {
-                    const token = localStorage.getItem('token');
-                    fetch(`${import.meta.env.VITE_API_URL || '/api'}/bookings/${selectedTask._id}/file`, { headers: { Authorization: `Bearer ${token}` } })
-                      .then(r => r.blob()).then(blob => {
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a'); a.href = url; a.download = selectedTask.fileOriginalName || 'document.pdf'; a.click(); URL.revokeObjectURL(url);
-                      }).catch(() => alert('Failed to download'));
-                  }}
-                  className="w-full flex items-center justify-center gap-2 bg-blue-50 text-blue-700 border border-blue-200 py-2.5 rounded-xl text-sm font-medium hover:bg-blue-100 transition-colors"
-                >
-                  <Download size={14} /><FileText size={14} /> Download PDF
-                </button>
+              {getBookingFiles(selectedTask).length > 0 && (
+                <div className="space-y-2">
+                  {getBookingFiles(selectedTask).map((file, index) => (
+                    <button
+                      key={`${file.url || file.originalName}-${index}`}
+                      onClick={() => downloadTaskFile(selectedTask, index)}
+                      className="w-full flex items-center justify-center gap-2 bg-blue-50 text-blue-700 border border-blue-200 py-2.5 rounded-xl text-sm font-medium hover:bg-blue-100 transition-colors"
+                    >
+                      <Download size={14} /><FileText size={14} /> Download {file.originalName || `PDF ${index + 1}`}
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
           </div>
@@ -287,15 +300,15 @@ const MyTasksPage = () => {
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl">
             <h3 className="text-lg font-bold text-gray-900 mb-1">Mark as Complete?</h3>
             <p className="text-sm text-gray-500 mb-4">Confirm completion of <strong>{confirmComplete.serviceName}</strong> for {confirmComplete.customerName}</p>
-            {confirmComplete.fileUrl && !confirmComplete.fileDownloaded && !downloadedFiles.has(confirmComplete._id) && (
+            {getBookingFiles(confirmComplete).length > 0 && !areAllBookingFilesDownloaded(confirmComplete, downloadedFiles) && (
               <p className="text-xs text-red-600 bg-red-50 p-2 rounded-lg mb-4 border border-red-100 flex items-center gap-1">
-                <AlertCircle size={11} /> Download the PDF before completing
+                <AlertCircle size={11} /> Download all PDFs before completing
               </p>
             )}
             <div className="flex gap-3">
               <button onClick={() => setConfirmComplete(null)} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-600 bg-gray-50 hover:bg-gray-100 transition-colors">Cancel</button>
               <button onClick={() => updateStatus(confirmComplete._id, 'completed')}
-                disabled={updating === confirmComplete._id || (confirmComplete.fileUrl && !confirmComplete.fileDownloaded && !downloadedFiles.has(confirmComplete._id))}
+                disabled={updating === confirmComplete._id || (getBookingFiles(confirmComplete).length > 0 && !areAllBookingFilesDownloaded(confirmComplete, downloadedFiles))}
                 className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors disabled:opacity-40">
                 {updating === confirmComplete._id ? 'Completing...' : 'Yes, Complete'}
               </button>

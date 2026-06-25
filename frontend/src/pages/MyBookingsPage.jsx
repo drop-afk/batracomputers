@@ -7,6 +7,7 @@ import {
   RefreshCw, Calendar, User, ArrowRight, MessageSquare, Phone, Search, Filter
 } from 'lucide-react';
 import { formatWhatsAppUrl } from '../utils/phone';
+import FrontendMessage from '../components/FrontendMessage';
 
 const statusConfig = {
   pending:     { label: 'Pending',     cls: 'bg-amber-50 text-amber-700 border-amber-200',     icon: Clock,         dot: 'bg-amber-500', desc: 'Waiting for a worker to pick up' },
@@ -28,6 +29,7 @@ const MyBookingsPage = () => {
   const [feedback, setFeedback] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState(null);
+  const [pageError, setPageError] = useState('');
 
   const fetchBookings = useCallback(async () => {
     try {
@@ -40,9 +42,10 @@ const MyBookingsPage = () => {
   useEffect(() => { fetchBookings(); const interval = setInterval(fetchBookings, 10000); return () => clearInterval(interval); }, [fetchBookings]);
 
   const submitRating = async () => {
+    setPageError('');
     setSubmitting(true);
     try { await api.patch(`/bookings/${ratingBooking._id}/rating`, { rating, feedback }); setRatingBooking(null); setRating(5); setFeedback(''); fetchBookings(); }
-    catch (err) { alert(err.response?.data?.message || 'Failed to submit rating'); }
+    catch (err) { setPageError(err.response?.data?.message || 'Failed to submit rating'); }
     finally { setSubmitting(false); }
   };
 
@@ -65,6 +68,7 @@ const MyBookingsPage = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <FrontendMessage message={pageError} onDismiss={() => setPageError('')} />
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
         <div>

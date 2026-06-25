@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { useAuth } from '../contexts/AuthContext';
@@ -8,6 +8,7 @@ import {
   FileText, ArrowRight, LogIn, Upload, AlertCircle, Shield, ChevronRight, Zap, Star
 } from 'lucide-react';
 import ServiceTiles from '../components/ServiceTiles';
+import FrontendMessage from '../components/FrontendMessage';
 
 const BookingPage = () => {
   const { serviceId } = useParams();
@@ -20,9 +21,11 @@ const BookingPage = () => {
   const [fetching, setFetching] = useState(true);
   const [showSuccess, setShowSuccess] = useState(false);
   const [bookingId, setBookingId] = useState(null);
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [fileError, setFileError] = useState('');
+  const [pageError, setPageError] = useState('');
   const [step, setStep] = useState(1);
+  const fileInputRef = useRef(null);
   const { register, handleSubmit, setValue, formState: { errors } } = useForm({
     defaultValues: { customerName: user?.name || '', customerEmail: user?.email || '', customerPhone: user?.phone || '' }
   });
@@ -53,21 +56,38 @@ const BookingPage = () => {
   const maxDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
   const handleFileChange = (e) => {
-    const selectedFile = e.target.files[0];
+    const selectedFiles = Array.from(e.target.files || []);
     setFileError('');
-    if (selectedFile) {
-      if (selectedFile.type !== 'application/pdf') {
-        setFileError('Only PDF files are allowed'); setFile(null); e.target.value = ''; return;
+    if (selectedFiles.length > 0) {
+      if (files.length + selectedFiles.length > 5) {
+        setFileError('You can upload up to 5 PDF files');
+        e.target.value = '';
+        return;
       }
-      if (selectedFile.size > 10 * 1024 * 1024) {
-        setFileError('File size must be under 10MB'); setFile(null); e.target.value = ''; return;
+
+      for (const selectedFile of selectedFiles) {
+        const isPdf = selectedFile.type === 'application/pdf' || selectedFile.name.toLowerCase().endsWith('.pdf');
+        if (!isPdf) {
+          setFileError('Only PDF files are allowed'); e.target.value = ''; return;
+        }
+        if (selectedFile.size > 10 * 1024 * 1024) {
+          setFileError('Each file must be under 10MB'); e.target.value = ''; return;
+        }
       }
-      setFile(selectedFile);
+      setFiles(prev => [...prev, ...selectedFiles].slice(0, 5));
+      e.target.value = '';
     }
   };
 
+  const removeFile = (index) => {
+    setFiles(prev => prev.filter((_, fileIndex) => fileIndex !== index));
+    setFileError('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   const onSubmit = async (data) => {
-    if (requiresPdf && !file) {
+    setPageError('');
+    if (requiresPdf && files.length === 0) {
       setFileError('A PDF file is required for this service. Please upload the document.');
       setStep(1); return;
     }
@@ -81,10 +101,10 @@ const BookingPage = () => {
       formData.append('quantity', Number(data.quantity));
       if (data.preferredDeadline) formData.append('preferredDeadline', data.preferredDeadline);
       if (data.specialRequirements) formData.append('specialRequirements', data.specialRequirements);
-      if (file) formData.append('file', file);
+      files.forEach(uploadFile => formData.append('files', uploadFile));
       const res = await api.post('/bookings', formData);
       setBookingId(res.data._id); setShowSuccess(true);
-    } catch (err) { alert(err.response?.data?.message || err.response?.data?.errors?.[0]?.msg || 'Failed to create booking'); }
+    } catch (err) { setPageError(err.response?.data?.message || err.response?.data?.errors?.[0]?.msg || 'Failed to create booking'); }
     finally { setLoading(false); }
   };
 
@@ -123,7 +143,7 @@ const BookingPage = () => {
           </div>
           <div className="space-y-3">
             <Link to="/my-bookings" className="block w-full py-3 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors">View My Bookings</Link>
-            <button onClick={() => { setShowSuccess(false); setFile(null); setFileError(''); setQuantity(1); }} className="block w-full py-3 rounded-xl text-sm font-semibold text-gray-700 bg-gray-50 border border-gray-200 hover:bg-gray-100 transition-colors">Book Another Service</button>
+            <button onClick={() => { setShowSuccess(false); setFiles([]); setFileError(''); setQuantity(1); }} className="block w-full py-3 rounded-xl text-sm font-semibold text-gray-700 bg-gray-50 border border-gray-200 hover:bg-gray-100 transition-colors">Book Another Service</button>
           </div>
         </div>
       </div>
@@ -132,6 +152,7 @@ const BookingPage = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <FrontendMessage message={pageError} onDismiss={() => setPageError('')} />
       <Link to="/" className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-900 transition-colors mb-6">
         <ArrowLeft size={16} /> Back to Home
       </Link>
@@ -209,33 +230,46 @@ const BookingPage = () => {
             </div>
 
             {/* Step 3: File Upload */}
-            <div className={`bg-white rounded-2xl border shadow-sm p-6 ${requiresPdf && !file && fileError ? 'border-red-300' : 'border-gray-100'}`}>
+            <div className={`bg-white rounded-2xl border shadow-sm p-6 ${requiresPdf && files.length === 0 && fileError ? 'border-red-300' : 'border-gray-100'}`}>
               <div className="flex items-center gap-2 mb-4">
                 <div className="w-7 h-7 rounded-lg bg-blue-600 text-white text-xs flex items-center justify-center font-bold">3</div>
                 <h3 className="font-semibold text-gray-900">Upload Document</h3>
                 {requiresPdf ? <span className="text-red-500 text-xs font-semibold bg-red-50 px-2 py-0.5 rounded-full">Required</span> : <span className="text-gray-400 text-xs font-normal">(optional)</span>}
               </div>
-              {requiresPdf && <p className="text-xs text-red-600 font-medium mb-3 flex items-center gap-1"><AlertCircle size={12} /> This service requires a PDF document</p>}
-              <div className={`border-2 border-dashed rounded-xl p-6 text-center transition-all ${requiresPdf && !file ? 'border-red-300 bg-red-50/50 hover:border-red-400' : file ? 'border-emerald-300 bg-emerald-50/50' : 'border-gray-200 hover:border-blue-300'}`}>
-                <input type="file" accept=".pdf,application/pdf" onChange={handleFileChange} className="hidden" id="file-upload" />
+              {requiresPdf && files.length === 0 && <p className="text-xs text-red-600 font-medium mb-3 flex items-center gap-1"><AlertCircle size={12} /> This service requires a PDF document</p>}
+              <div className={`border-2 border-dashed rounded-xl p-6 text-center transition-all ${requiresPdf && files.length === 0 ? 'border-red-300 bg-red-50/50 hover:border-red-400' : files.length > 0 ? 'border-emerald-300 bg-emerald-50/50' : 'border-gray-200 hover:border-blue-300'}`}>
+                <input ref={fileInputRef} type="file" accept=".pdf,application/pdf" multiple onChange={handleFileChange} className="hidden" id="file-upload" />
                 <label htmlFor="file-upload" className="cursor-pointer block">
-                  {file ? (
+                  {files.length > 0 ? (
                     <div className="flex items-center justify-center gap-2 text-sm">
                       <FileText size={20} className="text-emerald-600" />
-                      <span className="font-medium text-gray-700">{file.name}</span>
-                      <span className="text-xs text-gray-400">({(file.size / 1024 / 1024).toFixed(1)} MB)</span>
+                      <span className="font-medium text-gray-700">{files.length} PDF{files.length !== 1 ? 's' : ''} selected</span>
+                      <span className="text-xs text-gray-400">Add more ({5 - files.length} left)</span>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center gap-2">
                       <Upload size={24} className={requiresPdf ? 'text-red-400' : 'text-gray-400'} />
-                      <span className={`text-sm font-medium ${requiresPdf ? 'text-red-600' : 'text-gray-600'}`}>{requiresPdf ? 'Upload your PDF (required)' : 'Click to upload a PDF'}</span>
-                      <span className="text-xs text-gray-400">PDF only · Max 10MB</span>
+                      <span className={`text-sm font-medium ${requiresPdf ? 'text-red-600' : 'text-gray-600'}`}>{requiresPdf ? 'Upload your PDFs (required)' : 'Click to upload PDFs'}</span>
+                      <span className="text-xs text-gray-400">PDF only · Max 5 files · 10MB each</span>
                     </div>
                   )}
                 </label>
               </div>
+              {files.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  {files.map((uploadFile, index) => (
+                    <div key={`${uploadFile.name}-${uploadFile.lastModified}-${index}`} className="flex items-center justify-between gap-3 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText size={14} className="text-emerald-600 flex-shrink-0" />
+                        <span className="font-medium text-gray-700 truncate">{uploadFile.name}</span>
+                        <span className="text-gray-400 flex-shrink-0">({(uploadFile.size / 1024 / 1024).toFixed(1)} MB)</span>
+                      </div>
+                      <button type="button" onClick={() => removeFile(index)} className="text-red-500 hover:text-red-700 font-medium flex-shrink-0">Remove</button>
+                    </div>
+                  ))}
+                </div>
+              )}
               {fileError && <p className="text-red-500 text-xs mt-2 font-medium">{fileError}</p>}
-              {file && <button type="button" onClick={() => { setFile(null); setFileError(''); }} className="text-xs text-red-500 hover:text-red-700 mt-2">Remove file</button>}
             </div>
 
             {/* Step 4: Your Details */}

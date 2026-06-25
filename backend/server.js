@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -120,25 +120,34 @@ const cleanupOldFiles = async () => {
 
     const oldBookings = await Booking.find({
       status: 'completed',
-      fileUrl: { $ne: null },
-      completedAt: { $lt: threeDaysAgo }
+      completedAt: { $lt: threeDaysAgo },
+      $or: [
+        { fileUrl: { $ne: null } },
+        { files: { $exists: true, $ne: [] } }
+      ]
     });
 
     let deletedCount = 0;
     for (const booking of oldBookings) {
-      const filePath = path.join(__dirname, booking.fileUrl.replace(/^\//, ''));
-      try {
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
+      const files = booking.files?.length
+        ? booking.files
+        : (booking.fileUrl ? [{ url: booking.fileUrl }] : []);
+
+      for (const file of files) {
+        const filePath = path.join(__dirname, file.url.replace(/^\//, ''));
+        try {
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+          }
+        } catch (fileErr) {
+          console.warn(`[Cleanup] Could not delete file for booking ${booking._id}: ${fileErr.message}`);
         }
-      } catch (fileErr) {
-        console.warn(`[Cleanup] Could not delete file for booking ${booking._id}: ${fileErr.message}`);
       }
 
       await Booking.findByIdAndUpdate(booking._id, {
-        $set: { fileUrl: null, fileName: null, fileOriginalName: null, fileDownloaded: false }
+        $set: { fileUrl: null, fileName: null, fileOriginalName: null, fileDownloaded: false, files: [] }
       });
-      deletedCount++;
+      deletedCount += files.length;
     }
 
     if (deletedCount > 0) {
