@@ -23,6 +23,8 @@ const MyTasksPage = () => {
   const [confirmComplete, setConfirmComplete] = useState(null);
   const [costEdit, setCostEdit] = useState(null);
   const [newCost, setNewCost] = useState('');
+  // Track downloaded file IDs locally so UI updates immediately after download
+  const [downloadedFiles, setDownloadedFiles] = useState(new Set());
 
   useEffect(() => {
     fetchTasks();
@@ -197,16 +199,26 @@ const MyTasksPage = () => {
                           a.download = task.fileOriginalName || 'document.pdf';
                           a.click();
                           URL.revokeObjectURL(url);
+                          // Mark as downloaded locally so UI updates immediately
+                          setDownloadedFiles(prev => new Set(prev).add(task._id));
                         })
                         .catch(() => alert('Failed to download file'));
                     }}
-                    className="inline-flex items-center gap-2 w-full justify-center bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium text-sm py-2 px-4 rounded-lg transition-colors mb-3 border border-blue-200"
+                    className="inline-flex items-center gap-2 w-full justify-center bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium text-sm py-2 px-4 rounded-lg transition-colors mb-2 border border-blue-200"
                   >
                     <Download size={15} />
                     <FileText size={14} />
                     Download Document to Print
                     {task.fileOriginalName && <span className="text-xs text-blue-500 truncate max-w-[160px]">({task.fileOriginalName})</span>}
                   </a>
+                )}
+
+                {/* Warning: must download file before completing */}
+                {task.fileUrl && task.status === 'in_progress' && !task.fileDownloaded && !downloadedFiles.has(task._id) && (
+                  <p className="text-xs text-red-600 bg-red-50 p-2 rounded mb-3 border border-red-100 flex items-center gap-1.5">
+                    <AlertCircle size={12} />
+                    <strong>Action required:</strong> Download the PDF above before you can mark this task as complete.
+                  </p>
                 )}
 
                 {/* Status Actions */}
@@ -224,7 +236,8 @@ const MyTasksPage = () => {
                   {task.status === 'in_progress' && (
                     <button
                       onClick={() => setConfirmComplete(task)}
-                      className="flex-1 bg-green-100 text-green-800 py-2 rounded-lg text-sm font-medium hover:bg-green-200 transition-colors flex items-center justify-center gap-2"
+                      disabled={task.fileUrl && !task.fileDownloaded && !downloadedFiles.has(task._id)}
+                      className="flex-1 bg-green-100 text-green-800 py-2 rounded-lg text-sm font-medium hover:bg-green-200 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <CheckCircle size={14} /> Mark Complete
                     </button>
@@ -249,12 +262,18 @@ const MyTasksPage = () => {
           <div className="bg-white rounded-xl max-w-md w-full p-6">
             <h3 className="text-lg font-bold mb-2">Mark as Complete?</h3>
             <p className="text-sm text-gray-500 mb-4">Confirm completion of <strong>{confirmComplete.serviceName}</strong> for {confirmComplete.customerName}?</p>
+            {confirmComplete.fileUrl && !confirmComplete.fileDownloaded && !downloadedFiles.has(confirmComplete._id) && (
+              <p className="text-xs text-red-600 bg-red-50 p-2 rounded mb-4 border border-red-100 flex items-center gap-1.5">
+                <AlertCircle size={12} />
+                You must download the attached PDF before completing this task.
+              </p>
+            )}
             <div className="flex gap-3">
               <button onClick={() => setConfirmComplete(null)} className="flex-1 btn-secondary">Cancel</button>
               <button
                 onClick={() => updateStatus(confirmComplete._id, 'completed')}
-                disabled={updating === confirmComplete._id}
-                className="flex-1 bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 transition-colors disabled:opacity-50"
+                disabled={updating === confirmComplete._id || (confirmComplete.fileUrl && !confirmComplete.fileDownloaded && !downloadedFiles.has(confirmComplete._id))}
+                className="flex-1 bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {updating === confirmComplete._id ? 'Completing...' : 'Yes, Complete'}
               </button>

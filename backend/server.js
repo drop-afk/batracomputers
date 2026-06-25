@@ -10,15 +10,23 @@ const fs = require('fs');
 
 const app = express();
 
+// Disable X-Powered-By header to prevent information leakage (Security)
+app.disable('x-powered-by');
+
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, 'uploads', 'bookings');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Security headers with CSP (Issue #14)
+// Security headers with CSP and HSTS (Issue #14)
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }, // allow file downloads
+  hsts: {
+    maxAge: 31536000, // 1 year
+    includeSubDomains: true,
+    preload: true
+  },
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
@@ -101,7 +109,51 @@ const connectDB = async (retries = 5, delay = 5000) => {
     }
   }
 };
-connectDB();
+
+// Daily cleanup: delete PDFs from completed bookings older than 3 days
+const cleanupOldFiles = async () => {
+  try {
+    const Booking = require('./models/Booking');
+    const threeDaysAgo = new Date();
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+    threeDaysAgo.setHours(0, 0, 0, 0);
+
+    const oldBookings = await Booking.find({
+      status: 'completed',
+      fileUrl: { $ne: null },
+      completedAt: { $lt: threeDaysAgo }
+    });
+
+    let deletedCount = 0;
+    for (const booking of oldBookings) {
+      const filePath = path.join(__dirname, booking.fileUrl.replace(/^\//, ''));
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      } catch (fileErr) {
+        console.warn(`[Cleanup] Could not delete file for booking ${booking._id}: ${fileErr.message}`);
+      }
+
+      await Booking.findByIdAndUpdate(booking._id, {
+        $set: { fileUrl: null, fileName: null, fileOriginalName: null, fileDownloaded: false }
+      });
+      deletedCount++;
+    }
+
+    if (deletedCount > 0) {
+      console.log(`[Cleanup] Deleted ${deletedCount} PDF(s) from completed bookings older than 3 days`);
+    }
+  } catch (err) {
+    console.error('[Cleanup] Error during file cleanup:', err.message);
+  }
+};
+
+connectDB().then(() => {
+  // Run cleanup once on startup, then every 24 hours
+  cleanupOldFiles();
+  setInterval(cleanupOldFiles, 24 * 60 * 60 * 1000); // 24 hours
+});
 
 // Routes
 app.use('/auth', authLimiter, require('./routes/auth'));

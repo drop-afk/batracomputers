@@ -144,6 +144,19 @@ router.get('/customer/:customerId', authenticate, async (req, res) => {
   }
 });
 
+// GET /bookings/all — owner only, all recent bookings
+router.get('/all', authenticate, authorize('owner'), async (req, res) => {
+  try {
+    const bookings = await Booking.find()
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .lean();
+    res.json(bookings);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error fetching all bookings' });
+  }
+});
+
 // GET /bookings/pending — worker/owner only
 router.get('/pending', authenticate, authorize('worker', 'owner'), async (req, res) => {
   try {
@@ -216,7 +229,19 @@ router.get('/:id/file', authenticate, async (req, res) => {
       return res.status(403).json({ message: 'Access denied' });
     }
 
-    const filePath = path.join(__dirname, '..', booking.fileUrl);
+    // Resolve the file path and prevent path traversal (Security)
+    const uploadsBase = path.resolve(__dirname, '..', 'uploads', 'bookings');
+    const filePath = path.resolve(__dirname, '..', booking.fileUrl.replace(/^\//, ''));
+    if (!filePath.startsWith(uploadsBase)) {
+      return res.status(403).json({ message: 'Invalid file path' });
+    }
+
+    // Track that the assigned worker has downloaded the file
+    if (isAssignedWorker && !booking.fileDownloaded) {
+      booking.fileDownloaded = true;
+      await booking.save();
+    }
+
     res.download(filePath, booking.fileOriginalName || 'document.pdf');
   } catch (err) {
     res.status(500).json({ message: 'Server error downloading file' });
@@ -307,6 +332,11 @@ router.patch('/:id/status', authenticate, authorize('worker', 'owner'), [
 
     if (validTransitions[booking.status] && !validTransitions[booking.status].includes(status)) {
       return res.status(400).json({ message: `Cannot transition from '${booking.status}' to '${status}'` });
+    }
+
+    // If marking as completed and there's a file attached, enforce that it was downloaded first
+    if (status === 'completed' && booking.fileUrl && !booking.fileDownloaded) {
+      return res.status(400).json({ message: 'You must download the attached PDF before marking this task as complete' });
     }
 
     booking.status = status;

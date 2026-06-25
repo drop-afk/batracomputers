@@ -25,6 +25,8 @@ const WorkerDashboard = () => {
   const [updating, setUpdating] = useState(null);
   const [confirmComplete, setConfirmComplete] = useState(null);
   const [confirmAccept, setConfirmAccept] = useState(null);
+  // Track downloaded file IDs locally so UI updates immediately after download
+  const [downloadedFiles, setDownloadedFiles] = useState(new Set());
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -165,12 +167,21 @@ const WorkerDashboard = () => {
                         </button>
                       )}
                       {t.status === 'in_progress' && (
-                        <button onClick={() => setConfirmComplete(t)}
-                          className="flex-1 text-xs font-semibold bg-emerald-100 text-emerald-700 py-1.5 rounded-lg hover:bg-emerald-200 transition-colors">
+                        <button
+                          onClick={() => setConfirmComplete(t)}
+                          disabled={t.fileUrl && !t.fileDownloaded && !downloadedFiles.has(t._id)}
+                          className="flex-1 text-xs font-semibold bg-emerald-100 text-emerald-700 py-1.5 rounded-lg hover:bg-emerald-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
                           Mark Complete
                         </button>
                       )}
                     </div>
+                    {t.fileUrl && t.status === 'in_progress' && !t.fileDownloaded && !downloadedFiles.has(t._id) && (
+                      <p className="text-[11px] text-red-600 bg-red-50 p-1.5 rounded mt-2 border border-red-100 flex items-center gap-1">
+                        <AlertCircle size={10} />
+                        Download the PDF before completing.
+                      </p>
+                    )}
                   </div>
                 );
               })}
@@ -205,9 +216,19 @@ const WorkerDashboard = () => {
             </div>
             <h3 className="text-xl font-bold text-gray-900 text-center mb-1 font-display">Mark as Complete?</h3>
             <p className="text-sm text-gray-500 text-center mb-5">Confirm you've finished <strong>{confirmComplete.serviceName}</strong> for {confirmComplete.customerName}</p>
+            {confirmComplete.fileUrl && !confirmComplete.fileDownloaded && !downloadedFiles.has(confirmComplete._id) && (
+              <p className="text-xs text-red-600 bg-red-50 p-2 rounded mb-4 border border-red-100 flex items-center gap-1.5 text-center justify-center">
+                <AlertCircle size={12} />
+                You must download the attached PDF before completing this task.
+              </p>
+            )}
             <div className="flex gap-3">
               <button onClick={() => setConfirmComplete(null)} className="btn-secondary flex-1">Cancel</button>
-              <button onClick={() => updateStatus(confirmComplete._id, 'completed')} disabled={updating === confirmComplete._id} className="flex-1 bg-emerald-600 text-white py-2.5 rounded-xl font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50">
+              <button
+                onClick={() => updateStatus(confirmComplete._id, 'completed')}
+                disabled={updating === confirmComplete._id || (confirmComplete.fileUrl && !confirmComplete.fileDownloaded && !downloadedFiles.has(confirmComplete._id))}
+                className="flex-1 bg-emerald-600 text-white py-2.5 rounded-xl font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
                 {updating === confirmComplete._id ? <Loader2 className="animate-spin mx-auto" size={18} /> : 'Yes, Complete'}
               </button>
             </div>

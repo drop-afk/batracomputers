@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../utils/api';
-import { Plus, Pencil, Trash2, Star, CheckCircle, Clock, TrendingUp, Users, Package, Loader2, XCircle, IndianRupee, Save, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, Star, CheckCircle, Clock, TrendingUp, Users, Package, Loader2, XCircle, IndianRupee, Save, X, BarChart3, Percent, ArrowUpCircle, ArrowDownCircle, FileCheck, AlertTriangle } from 'lucide-react';
 
 const AdminPanel = () => {
   const { user } = useAuth();
@@ -9,6 +9,7 @@ const AdminPanel = () => {
   const [services, setServices] = useState([]);
   const [workers, setWorkers] = useState([]);
   const [analytics, setAnalytics] = useState(null);
+  const [workerReport, setWorkerReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showServiceForm, setShowServiceForm] = useState(false);
   const [showWorkerForm, setShowWorkerForm] = useState(false);
@@ -23,14 +24,16 @@ const AdminPanel = () => {
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const [svcRes, workerRes, analyticsRes] = await Promise.all([
+      const [svcRes, workerRes, analyticsRes, reportRes] = await Promise.all([
         api.get('/services'),
         api.get('/users/workers'),
-        api.get('/analytics/dashboard')
+        api.get('/analytics/dashboard'),
+        api.get('/analytics/workers-report')
       ]);
       setServices(svcRes.data);
       setWorkers(workerRes.data);
       setAnalytics(analyticsRes.data);
+      setWorkerReport(reportRes.data.report);
     } catch (err) {
       console.error('Admin fetch error', err);
     } finally {
@@ -87,7 +90,8 @@ const AdminPanel = () => {
   const tabs = [
     { id: 'analytics', label: 'Analytics', icon: TrendingUp },
     { id: 'services', label: 'Services', icon: Package },
-    { id: 'workers', label: 'Workers', icon: Users }
+    { id: 'workers', label: 'Workers', icon: Users },
+    { id: 'workerReports', label: 'Worker Reports', icon: BarChart3 }
   ];
 
   return (
@@ -293,6 +297,117 @@ const AdminPanel = () => {
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+          {/* Worker Reports Tab */}
+          {activeTab === 'workerReports' && workerReport && (
+            <div className="space-y-6">
+              {/* Summary Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                {(() => {
+                  const totalWorkers = workerReport.length;
+                  const activeWorkers = workerReport.filter(w => w.isActive).length;
+                  const avgAcceptance = totalWorkers > 0 ? Math.round(workerReport.reduce((s, w) => s + w.rates.acceptanceRate, 0) / totalWorkers) : 0;
+                  const avgCompletion = totalWorkers > 0 ? Math.round(workerReport.reduce((s, w) => s + w.rates.completionRate, 0) / totalWorkers) : 0;
+                  const totalRevenue = workerReport.reduce((s, w) => s + w.performance.totalRevenue, 0);
+                  return [
+                    { label: 'Total Workers', value: totalWorkers, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
+                    { label: 'Active Workers', value: activeWorkers, icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50' },
+                    { label: 'Avg Acceptance', value: `${avgAcceptance}%`, icon: ArrowUpCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                    { label: 'Avg Completion', value: `${avgCompletion}%`, icon: FileCheck, color: 'text-violet-600', bg: 'bg-violet-50' },
+                    { label: 'Total Revenue', value: `₹${totalRevenue}`, icon: IndianRupee, color: 'text-amber-600', bg: 'bg-amber-50' }
+                  ].map(stat => (
+                    <div key={stat.label} className="card p-4">
+                      <div className={`w-10 h-10 ${stat.bg} rounded-lg flex items-center justify-center mb-2`}>
+                        <stat.icon size={18} className={stat.color} />
+                      </div>
+                      <p className="text-2xl font-bold">{stat.value}</p>
+                      <p className="text-xs text-gray-500">{stat.label}</p>
+                    </div>
+                  ));
+                })()}
+              </div>
+
+              {/* Detailed Worker Table */}
+              <div className="card overflow-hidden">
+                <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+                  <h3 className="font-semibold">Worker Performance Details</h3>
+                  <span className="text-xs text-gray-400">Sorted by completed tasks</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 text-gray-600 text-left">
+                        <th className="px-4 py-3 font-medium">Worker</th>
+                        <th className="px-4 py-3 font-medium text-center">Assigned</th>
+                        <th className="px-4 py-3 font-medium text-center">Completed</th>
+                        <th className="px-4 py-3 font-medium text-center">Rejected</th>
+                        <th className="px-4 py-3 font-medium text-center">Acceptance</th>
+                        <th className="px-4 py-3 font-medium text-center">Rejection</th>
+                        <th className="px-4 py-3 font-medium text-center">Completion</th>
+                        <th className="px-4 py-3 font-medium text-center">Rating</th>
+                        <th className="px-4 py-3 font-medium text-right">Revenue</th>
+                        <th className="px-4 py-3 font-medium text-center">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {workerReport.map(w => (
+                        <tr key={w._id} className="hover:bg-gray-50/50 transition-colors">
+                          <td className="px-4 py-3">
+                            <div>
+                              <p className="font-medium text-gray-900">{w.name}</p>
+                              <p className="text-xs text-gray-400">{w.phone}</p>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center font-medium">{w.stats.totalAssigned}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className="font-medium text-green-700">{w.stats.completed}</span>
+                            <span className="text-xs text-gray-400 block">T:{w.stats.completedToday} W:{w.stats.completedWeek}</span>
+                          </td>
+                          <td className="px-4 py-3 text-center font-medium text-red-600">{w.stats.rejected}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${w.rates.acceptanceRate >= 80 ? 'bg-green-100 text-green-700' : w.rates.acceptanceRate >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                              <ArrowUpCircle size={10} />
+                              {w.rates.acceptanceRate}%
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${w.rates.rejectionRate <= 20 ? 'bg-green-100 text-green-700' : w.rates.rejectionRate <= 40 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                              <ArrowDownCircle size={10} />
+                              {w.rates.rejectionRate}%
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${w.rates.completionRate >= 80 ? 'bg-green-100 text-green-700' : w.rates.completionRate >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                              <FileCheck size={10} />
+                              {w.rates.completionRate}%
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <Star size={12} className="text-yellow-500 fill-yellow-500" />
+                              <span className="font-medium">{w.performance.avgRating || '—'}</span>
+                              <span className="text-xs text-gray-400">({w.performance.totalRated})</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-right font-medium">₹{w.performance.totalRevenue}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${w.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                              {w.isActive ? 'Active' : 'Inactive'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {workerReport.length === 0 && (
+                  <div className="text-center py-10">
+                    <AlertTriangle className="mx-auto text-gray-300 mb-3" size={40} />
+                    <p className="text-gray-500 text-sm">No worker data available</p>
+                  </div>
+                )}
               </div>
             </div>
           )}

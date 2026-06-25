@@ -100,9 +100,7 @@ const BookingPage = () => {
       if (data.specialRequirements) formData.append('specialRequirements', data.specialRequirements);
       if (file) formData.append('file', file);
 
-      const res = await api.post('/bookings', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
+      const res = await api.post('/bookings', formData);
       setBookingId(res.data._id);
       setShowSuccess(true);
     } catch (err) {

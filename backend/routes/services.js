@@ -1,5 +1,5 @@
 const express = require('express');
-const { body, validationResult } = require('express-validator');
+const { body, param, validationResult } = require('express-validator');
 const { Types } = require('mongoose');
 const Service = require('../models/Service');
 const { authenticate, authorize } = require('../middleware/auth');
@@ -43,7 +43,10 @@ router.post('/', authenticate, authorize('owner'), serviceValidation, validate, 
 });
 
 // PUT /services/:id — admin only; explicit field pick (Issue #11)
-router.put('/:id', authenticate, authorize('owner'), serviceValidation, validate, async (req, res) => {
+router.put('/:id', authenticate, authorize('owner'), [
+  param('id').custom(v => Types.ObjectId.isValid(v)).withMessage('Invalid service ID'),
+  ...serviceValidation
+], validate, async (req, res) => {
   try {
     const { name, description, category, basePrice, priceUnit, estimatedTime, isActive } = req.body;
     const service = await Service.findByIdAndUpdate(

@@ -26,7 +26,9 @@ router.post('/workers', authenticate, authorize('owner'), [
   body('name').trim().notEmpty().withMessage('Name is required'),
   body('email').isEmail().normalizeEmail().withMessage('Valid email required'),
   body('phone').trim().notEmpty().withMessage('Phone required'),
-  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
+  body('password')
+    .isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
+    .matches(/\d/).withMessage('Password must contain at least one number'),
 ], validate, async (req, res) => {
   try {
     const { name, email, phone, password } = req.body;

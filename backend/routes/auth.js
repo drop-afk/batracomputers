@@ -56,6 +56,11 @@ router.post('/login', [
     const user = await User.findOne({ email }).select('+password');
     if (!user) return res.status(400).json({ message: 'Invalid credentials' });
 
+    // Prevent deactivated accounts from logging in (Security)
+    if (!user.isActive) {
+      return res.status(403).json({ message: 'Account has been deactivated. Please contact admin.' });
+    }
+
     const isMatch = await user.comparePassword(password);
     if (!isMatch) return res.status(400).json({ message: 'Invalid credentials' });
 

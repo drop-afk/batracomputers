@@ -25,6 +25,7 @@ const bookingSchema = new mongoose.Schema({
   fileUrl: { type: String, default: null },
   fileName: { type: String, default: null },
   fileOriginalName: { type: String, default: null },
+  fileDownloaded: { type: Boolean, default: false },
   // Removed manual createdAt — handled by timestamps:true below (Issue #18)
   acceptedAt: { type: Date, default: null },
   completedAt: { type: Date, default: null },

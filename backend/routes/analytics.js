@@ -49,6 +49,91 @@ router.get('/dashboard', authenticate, authorize('owner'), async (req, res) => {
   }
 });
 
+// GET /analytics/workers-report — admin only, detailed worker performance report
+router.get('/workers-report', authenticate, authorize('owner'), async (req, res) => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const weekAgo = new Date(today);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    const monthAgo = new Date(today);
+    monthAgo.setDate(monthAgo.getDate() - 30);
+
+    const workers = await User.find({ role: 'worker' }).select('name email phone completedTasks acceptedTasks rejectedTasks avgRating isActive createdAt');
+
+    const workerIds = workers.map(w => w._id.toString());
+
+    // Aggregate all bookings per worker
+    const allBookings = await Booking.find({ assignedTo: { $in: workerIds } }).lean();
+
+    const report = workers.map(worker => {
+      const workerBookings = allBookings.filter(b => b.assignedTo?.toString() === worker._id.toString());
+      const completed = workerBookings.filter(b => b.status === 'completed');
+      const rejected = workerBookings.filter(b => b.status === 'rejected');
+      const totalAssigned = workerBookings.length;
+      const completedToday = completed.filter(b => new Date(b.completedAt) >= today).length;
+      const completedWeek = completed.filter(b => new Date(b.completedAt) >= weekAgo).length;
+      const completedMonth = completed.filter(b => new Date(b.completedAt) >= monthAgo).length;
+      const totalRejected = rejected.length;
+
+      const totalInteracted = worker.acceptedTasks + worker.rejectedTasks; // accepted + rejected from User counters
+      const acceptanceRate = totalInteracted > 0 ? Math.round((worker.acceptedTasks / totalInteracted) * 100) : 0;
+      const rejectionRate = totalInteracted > 0 ? Math.round((worker.rejectedTasks / totalInteracted) * 100) : 0;
+      const completionRate = totalAssigned > 0 ? Math.round((completed.length / totalAssigned) * 100) : 0;
+
+      const ratedBookings = completed.filter(b => b.rating != null);
+      const avgRatingCalc = ratedBookings.length > 0
+        ? Math.round((ratedBookings.reduce((sum, b) => sum + b.rating, 0) / ratedBookings.length) * 10) / 10
+        : 0;
+
+      const totalRevenue = completed.reduce((sum, b) => sum + (b.finalCost || b.estimatedCost || 0), 0);
+
+      return {
+        _id: worker._id,
+        name: worker.name,
+        email: worker.email,
+        phone: worker.phone,
+        isActive: worker.isActive,
+        joinedAt: worker.createdAt,
+        stats: {
+          totalAssigned,
+          completed: completed.length,
+          rejected: totalRejected,
+          completedToday,
+          completedWeek,
+          completedMonth
+        },
+        rates: {
+          acceptanceRate,
+          rejectionRate,
+          completionRate
+        },
+        performance: {
+          avgRating: avgRatingCalc,
+          totalRevenue,
+          totalRated: ratedBookings.length
+        },
+        rawCounters: {
+          acceptedTasks: worker.acceptedTasks,
+          rejectedTasks: worker.rejectedTasks,
+          completedTasks: worker.completedTasks
+        }
+      };
+    });
+
+    // Sort by most completed tasks first, then by rating
+    report.sort((a, b) => {
+      if (b.stats.completed !== a.stats.completed) return b.stats.completed - a.stats.completed;
+      return b.performance.avgRating - a.performance.avgRating;
+    });
+
+    res.json({ report, generatedAt: new Date() });
+  } catch (err) {
+    console.error('Workers report error:', err);
+    res.status(500).json({ message: 'Server error generating workers report' });
+  }
+});
+
 // GET /analytics/worker/:workerId — fixed require() inside runtime + ObjectId validation (Issue #13)
 router.get('/worker/:workerId', authenticate, authorize('worker', 'owner'), async (req, res) => {
   try {
