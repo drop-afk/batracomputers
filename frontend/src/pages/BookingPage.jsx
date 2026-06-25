@@ -5,10 +5,11 @@ import { useAuth } from '../contexts/AuthContext';
 import api from '../utils/api';
 import {
   ArrowLeft, CheckCircle, Clock, IndianRupee, Loader2, Tag, Calendar,
-  FileText, ArrowRight, LogIn, Upload, AlertCircle, Shield, ChevronRight, Zap, Star
+  FileText, ArrowRight, LogIn, Upload, AlertCircle, Shield, CreditCard, Banknote
 } from 'lucide-react';
 import ServiceTiles from '../components/ServiceTiles';
 import FrontendMessage from '../components/FrontendMessage';
+import { openRazorpayCheckout } from '../utils/razorpay';
 
 const BookingPage = () => {
   const { serviceId } = useParams();
@@ -24,6 +25,8 @@ const BookingPage = () => {
   const [files, setFiles] = useState([]);
   const [fileError, setFileError] = useState('');
   const [pageError, setPageError] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('online');
+  const [paymentOutcome, setPaymentOutcome] = useState('confirmed');
   const [step, setStep] = useState(1);
   const fileInputRef = useRef(null);
   const { register, handleSubmit, setValue, formState: { errors } } = useForm({
@@ -98,12 +101,26 @@ const BookingPage = () => {
       formData.append('customerEmail', data.customerEmail);
       formData.append('customerPhone', data.customerPhone);
       formData.append('serviceId', data.serviceId);
-      formData.append('quantity', Number(data.quantity));
+      formData.append('quantity', quantity);
+      formData.append('paymentMethod', paymentMethod);
       if (data.preferredDeadline) formData.append('preferredDeadline', data.preferredDeadline);
       if (data.specialRequirements) formData.append('specialRequirements', data.specialRequirements);
       files.forEach(uploadFile => formData.append('files', uploadFile));
       const res = await api.post('/bookings', formData);
-      setBookingId(res.data._id); setShowSuccess(true);
+      const booking = res.data.booking;
+      setBookingId(booking._id);
+      if (paymentMethod === 'online') {
+        try {
+          const paidBooking = await openRazorpayCheckout({ booking, payment: res.data.payment });
+          setPaymentOutcome(paidBooking ? 'confirmed' : 'pending');
+        } catch (paymentError) {
+          setPaymentOutcome('pending');
+          setPageError(paymentError.response?.data?.message || paymentError.message || 'Payment was not completed');
+        }
+      } else {
+        setPaymentOutcome('confirmed');
+      }
+      setShowSuccess(true);
     } catch (err) { setPageError(err.response?.data?.message || err.response?.data?.errors?.[0]?.msg || 'Failed to create booking'); }
     finally { setLoading(false); }
   };
@@ -132,11 +149,19 @@ const BookingPage = () => {
     <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center px-4">
       <div className="w-full max-w-md text-center">
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-10">
-          <div className="w-16 h-16 rounded-2xl bg-emerald-50 flex items-center justify-center mx-auto mb-5">
-            <CheckCircle className="text-emerald-500" size={32} />
+          <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5 ${paymentOutcome === 'confirmed' ? 'bg-emerald-50' : 'bg-violet-50'}`}>
+            {paymentOutcome === 'confirmed'
+              ? <CheckCircle className="text-emerald-500" size={32} />
+              : <CreditCard className="text-violet-500" size={32} />}
           </div>
-          <h2 className="text-xl font-bold text-gray-900 mb-2">Booking Confirmed!</h2>
-          <p className="text-sm text-gray-500 mb-6">Your request has been received. We'll assign a worker shortly and notify you.</p>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">{paymentOutcome === 'confirmed' ? 'Booking Confirmed!' : 'Payment Pending'}</h2>
+          <p className="text-sm text-gray-500 mb-6">
+            {paymentOutcome === 'confirmed'
+              ? paymentMethod === 'online'
+                ? 'Payment received. Your request is now available to our workers.'
+                : 'Your request has been received. You can pay when the service is delivered.'
+              : 'Your booking was saved but is not active yet. Complete payment from My Bookings when you are ready.'}
+          </p>
           <div className="bg-gray-50 rounded-xl p-4 mb-6">
             <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mb-1">Booking ID</p>
             <p className="font-mono text-sm font-bold text-gray-700 break-all">{bookingId}</p>
@@ -297,8 +322,39 @@ const BookingPage = () => {
               </div>
             </div>
 
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-7 h-7 rounded-lg bg-blue-600 text-white text-xs flex items-center justify-center font-bold">5</div>
+                <h3 className="font-semibold text-gray-900">Payment Method</h3>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button type="button" onClick={() => setPaymentMethod('online')}
+                  className={`text-left rounded-xl border p-4 transition-all ${paymentMethod === 'online' ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500/10' : 'border-gray-200 hover:border-gray-300'}`}>
+                  <div className="flex items-center gap-3">
+                    <CreditCard size={20} className={paymentMethod === 'online' ? 'text-blue-600' : 'text-gray-400'} />
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">Pay now</p>
+                      <p className="text-xs text-gray-500 mt-0.5">UPI, cards, netbanking and wallets</p>
+                    </div>
+                  </div>
+                </button>
+                <button type="button" onClick={() => setPaymentMethod('pay_on_delivery')}
+                  className={`text-left rounded-xl border p-4 transition-all ${paymentMethod === 'pay_on_delivery' ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500/10' : 'border-gray-200 hover:border-gray-300'}`}>
+                  <div className="flex items-center gap-3">
+                    <Banknote size={20} className={paymentMethod === 'pay_on_delivery' ? 'text-blue-600' : 'text-gray-400'} />
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">Pay on delivery</p>
+                      <p className="text-xs text-gray-500 mt-0.5">Pay when your service is delivered</p>
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
+
             <button type="submit" disabled={loading} className="w-full py-4 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
-              {loading ? <><Loader2 className="animate-spin" size={18} /> Processing...</> : <><ArrowRight size={18} /> Confirm Booking</>}
+              {loading
+                ? <><Loader2 className="animate-spin" size={18} /> Processing...</>
+                : <><ArrowRight size={18} /> {paymentMethod === 'online' ? `Pay ₹${estimatedCost} now` : 'Confirm booking'}</>}
             </button>
           </form>
         </div>
@@ -327,7 +383,11 @@ const BookingPage = () => {
                     <span className="font-semibold text-gray-900">Estimated Total</span>
                     <span className="text-2xl font-bold text-blue-700">₹{estimatedCost}</span>
                   </div>
-                  <p className="text-xs text-gray-400 leading-relaxed">Final amount may vary based on actual work. Payment collected at pickup.</p>
+                  <p className="text-xs text-gray-400 leading-relaxed">
+                    {paymentMethod === 'online'
+                      ? 'Secure online payment via Razorpay. The booking activates after payment verification.'
+                      : 'No online payment required. Pay when the service is delivered.'}
+                  </p>
                 </div>
               ) : <p className="text-center text-sm text-gray-400 py-4">Select a service to see pricing</p>}
             </div>

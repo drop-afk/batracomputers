@@ -2,6 +2,8 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
+const Razorpay = require('razorpay');
 const { body, param, validationResult } = require('express-validator');
 const { Types } = require('mongoose');
 const Booking = require('../models/Booking');
@@ -9,6 +11,33 @@ const Service = require('../models/Service');
 const User = require('../models/User');
 const { authenticate, authorize } = require('../middleware/auth');
 const router = express.Router();
+
+const getRazorpayClient = () => {
+  if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) return null;
+  return new Razorpay({
+    key_id: process.env.RAZORPAY_KEY_ID,
+    key_secret: process.env.RAZORPAY_KEY_SECRET
+  });
+};
+
+const createRazorpayOrder = async (booking) => {
+  const razorpay = getRazorpayClient();
+  if (!razorpay) {
+    const error = new Error('Online payment is not configured');
+    error.status = 503;
+    throw error;
+  }
+
+  return razorpay.orders.create({
+    amount: Math.round(booking.estimatedCost * 100),
+    currency: 'INR',
+    receipt: `booking_${booking._id}`,
+    notes: {
+      bookingId: booking._id.toString(),
+      serviceName: booking.serviceName
+    }
+  });
+};
 
 // Multer config — PDF only, 10MB max
 const storage = multer.diskStorage({
@@ -89,11 +118,23 @@ router.post('/', authenticate, upload.fields([
     const n = Number(v);
     return Number.isInteger(n) && n >= 1 && n <= 1000;
   }).withMessage('Quantity must be between 1 and 1000'),
+  body('paymentMethod')
+    .optional()
+    .isIn(['online', 'pay_on_delivery'])
+    .withMessage('Select a valid payment method'),
   body('specialRequirements').optional({ checkFalsy: true }).trim().isLength({ max: 1000 }).withMessage('Max 1000 chars'),
 ], validate, async (req, res) => {
   try {
-    const { customerName, customerEmail, customerPhone, serviceId, quantity, specialRequirements, preferredDeadline } = req.body;
+    const {
+      customerName, customerEmail, customerPhone, serviceId, quantity,
+      specialRequirements, preferredDeadline, paymentMethod = 'pay_on_delivery'
+    } = req.body;
     const uploadedFiles = getUploadedFiles(req);
+
+    if (paymentMethod === 'online' && !getRazorpayClient()) {
+      cleanupUploadedFiles(uploadedFiles);
+      return res.status(503).json({ message: 'Online payment is temporarily unavailable. Please choose Pay on delivery.' });
+    }
 
     const service = await Service.findById(serviceId);
     if (!service || !service.isActive) return res.status(404).json({ message: 'Service not found or inactive' });
@@ -123,7 +164,9 @@ router.post('/', authenticate, upload.fields([
       specialRequirements,
       preferredDeadline: deadline,
       estimatedCost,
-      status: 'pending'
+      paymentMethod,
+      paymentStatus: paymentMethod === 'online' ? 'pending' : 'pay_on_delivery',
+      status: paymentMethod === 'online' ? 'awaiting_payment' : 'pending'
     };
 
     if (uploadedFiles.length > 5) {
@@ -158,12 +201,123 @@ router.post('/', authenticate, upload.fields([
 
     const booking = new Booking(bookingData);
     await booking.save();
-    res.status(201).json(booking);
+
+    if (paymentMethod === 'online') {
+      try {
+        const order = await createRazorpayOrder(booking);
+        booking.razorpayOrderId = order.id;
+        await booking.save();
+        return res.status(201).json({
+          booking,
+          payment: {
+            keyId: process.env.RAZORPAY_KEY_ID,
+            orderId: order.id,
+            amount: order.amount,
+            currency: order.currency
+          }
+        });
+      } catch (paymentError) {
+        await Booking.findByIdAndDelete(booking._id);
+        cleanupUploadedFiles(uploadedFiles);
+        return res.status(paymentError.status || 502).json({
+          message: paymentError.status === 503
+            ? paymentError.message
+            : 'Could not start online payment. Please try again or choose Pay on delivery.'
+        });
+      }
+    }
+
+    res.status(201).json({ booking });
   } catch (err) {
     console.error('Booking creation error:', err);
     // Clean up uploaded files if booking failed
     cleanupUploadedFiles(getUploadedFiles(req));
     res.status(500).json({ message: 'Server error creating booking' });
+  }
+});
+
+// POST /bookings/:id/payment-order — return an existing order or create one for retry
+router.post('/:id/payment-order', authenticate, async (req, res) => {
+  try {
+    if (!Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid booking ID' });
+    }
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) return res.status(404).json({ message: 'Booking not found' });
+    if (booking.customerId?.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Only the booking customer can make this payment' });
+    }
+    if (booking.paymentMethod !== 'online') {
+      return res.status(400).json({ message: 'This booking uses Pay on delivery' });
+    }
+    if (booking.paymentStatus === 'paid') {
+      return res.status(400).json({ message: 'This booking is already paid' });
+    }
+
+    let orderId = booking.razorpayOrderId;
+    let amount = Math.round(booking.estimatedCost * 100);
+    let currency = 'INR';
+    if (!orderId) {
+      const order = await createRazorpayOrder(booking);
+      orderId = order.id;
+      amount = order.amount;
+      currency = order.currency;
+      booking.razorpayOrderId = orderId;
+      await booking.save();
+    }
+
+    res.json({
+      booking,
+      payment: { keyId: process.env.RAZORPAY_KEY_ID, orderId, amount, currency }
+    });
+  } catch (err) {
+    res.status(err.status || 502).json({ message: err.message || 'Could not start online payment' });
+  }
+});
+
+// POST /bookings/:id/verify-payment — verify Razorpay HMAC before activating booking
+router.post('/:id/verify-payment', authenticate, [
+  body('razorpay_payment_id').trim().notEmpty().withMessage('Payment ID is required'),
+  body('razorpay_order_id').trim().notEmpty().withMessage('Order ID is required'),
+  body('razorpay_signature').trim().notEmpty().withMessage('Payment signature is required')
+], validate, async (req, res) => {
+  try {
+    if (!Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid booking ID' });
+    }
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) return res.status(404).json({ message: 'Booking not found' });
+    if (booking.customerId?.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Only the booking customer can verify this payment' });
+    }
+    if (booking.paymentStatus === 'paid') return res.json(booking);
+
+    const { razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body;
+    if (!process.env.RAZORPAY_KEY_SECRET || razorpay_order_id !== booking.razorpayOrderId) {
+      return res.status(400).json({ message: 'Payment verification failed' });
+    }
+
+    const expectedSignature = crypto
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .update(`${booking.razorpayOrderId}|${razorpay_payment_id}`)
+      .digest('hex');
+    const supplied = Buffer.from(razorpay_signature, 'utf8');
+    const expected = Buffer.from(expectedSignature, 'utf8');
+    if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) {
+      booking.paymentStatus = 'failed';
+      await booking.save();
+      return res.status(400).json({ message: 'Payment verification failed' });
+    }
+
+    booking.razorpayPaymentId = razorpay_payment_id;
+    booking.paymentStatus = 'paid';
+    booking.paid = true;
+    booking.paidAt = new Date();
+    booking.status = 'pending';
+    await booking.save();
+    res.json(booking);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error verifying payment' });
   }
 });
 
@@ -362,12 +516,15 @@ router.patch('/:id/reject', authenticate, authorize('worker', 'owner'), async (r
 // PATCH /bookings/:id/status — update status with valid transitions
 router.patch('/:id/status', authenticate, authorize('worker', 'owner'), [
   body('status').isIn(['in_progress', 'completed', 'rejected']).withMessage('Invalid status'),
+  body('pickupSlots').optional().isArray({ max: 6 }).withMessage('Pickup slots must be a list of up to 6 dates'),
+  body('pickupSlots.*.date').optional().isISO8601().withMessage('Each pickup slot must have a valid date and time'),
+  body('pickupSlots.*.note').optional({ checkFalsy: true }).trim().isLength({ max: 300 }).withMessage('Pickup note must be 300 characters or less'),
 ], validate, async (req, res) => {
   try {
     if (!Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ message: 'Invalid booking ID' });
     }
-    const { status } = req.body;
+    const { status, pickupSlots = [] } = req.body;
     const booking = await Booking.findById(req.params.id);
     if (!booking) return res.status(404).json({ message: 'Booking not found' });
 
@@ -394,6 +551,19 @@ router.patch('/:id/status', authenticate, authorize('worker', 'owner'), [
 
     booking.status = status;
     if (status === 'completed') {
+      const uniqueSlots = new Map();
+      pickupSlots.forEach(slot => {
+        const date = new Date(slot.date);
+        uniqueSlots.set(date.toISOString(), { date, note: String(slot.note || '').trim() });
+      });
+      const normalizedSlots = [...uniqueSlots.values()].sort((a, b) => a.date - b.date);
+      if (normalizedSlots.some(slot => slot.date <= new Date())) {
+        return res.status(400).json({ message: 'Pickup dates and times must be in the future' });
+      }
+      booking.pickupSlots = normalizedSlots;
+      booking.selectedPickupSlot = null;
+      booking.pickupSelectedAt = null;
+      booking.pickupSelectionSeenAt = null;
       booking.completedAt = new Date();
       await User.findByIdAndUpdate(booking.assignedTo, {
         $inc: { completedTasks: 1 },
@@ -405,6 +575,69 @@ router.patch('/:id/status', authenticate, authorize('worker', 'owner'), [
     res.json(booking);
   } catch (err) {
     res.status(500).json({ message: 'Server error updating status' });
+  }
+});
+
+// PATCH /bookings/:id/pickup-slot — customer may optionally select one offered slot
+router.patch('/:id/pickup-slot', authenticate, [
+  body('pickupSlot').optional({ nullable: true }).isISO8601().withMessage('Select a valid pickup date and time')
+], validate, async (req, res) => {
+  try {
+    if (!Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid booking ID' });
+    }
+
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) return res.status(404).json({ message: 'Booking not found' });
+    if (booking.customerId?.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Only the booking customer can select a pickup time' });
+    }
+    if (booking.status !== 'completed') {
+      return res.status(400).json({ message: 'Pickup time can only be selected for completed work' });
+    }
+
+    const { pickupSlot } = req.body;
+    if (!pickupSlot) {
+      booking.selectedPickupSlot = null;
+      booking.pickupSelectedAt = null;
+      booking.pickupSelectionSeenAt = null;
+    } else {
+      const selected = new Date(pickupSlot);
+      const offered = booking.pickupSlots.some(slot => slot.date.getTime() === selected.getTime());
+      if (!offered) {
+        return res.status(400).json({ message: 'Please select one of the pickup times offered by the worker' });
+      }
+      booking.selectedPickupSlot = selected;
+      booking.pickupSelectedAt = new Date();
+      booking.pickupSelectionSeenAt = null;
+    }
+
+    await booking.save();
+    res.json(booking);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error selecting pickup time' });
+  }
+});
+
+// PATCH /bookings/:id/pickup-selection-seen — assigned worker acknowledges pickup notification
+router.patch('/:id/pickup-selection-seen', authenticate, authorize('worker', 'owner'), async (req, res) => {
+  try {
+    if (!Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid booking ID' });
+    }
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) return res.status(404).json({ message: 'Booking not found' });
+    if (req.user.role === 'worker' && booking.assignedTo?.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Not assigned to you' });
+    }
+    if (!booking.selectedPickupSlot) {
+      return res.status(400).json({ message: 'No pickup selection to acknowledge' });
+    }
+    booking.pickupSelectionSeenAt = new Date();
+    await booking.save();
+    res.json(booking);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error acknowledging pickup notification' });
   }
 });
 
@@ -458,6 +691,9 @@ router.patch('/:id/final-cost', authenticate, authorize('worker', 'owner'), [
     if (!booking) return res.status(404).json({ message: 'Booking not found' });
     if (req.user.role === 'worker' && booking.assignedTo?.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Not assigned to you' });
+    }
+    if (booking.paymentStatus === 'paid' && parseFloat(finalCost) !== booking.estimatedCost) {
+      return res.status(400).json({ message: 'The total for an online-paid booking cannot be changed' });
     }
     booking.finalCost = parseFloat(finalCost);
     await booking.save();

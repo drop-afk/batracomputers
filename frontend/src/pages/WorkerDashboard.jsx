@@ -8,6 +8,8 @@ import {
   TrendingUp, ArrowRight, Package, Zap, Timer, Download, FileText
 } from 'lucide-react';
 import FrontendMessage from '../components/FrontendMessage';
+import PickupSlotFields from '../components/PickupSlotFields';
+import PickupNotifications from '../components/PickupNotifications';
 
 const statusConfig = {
   pending:     { label: 'New Request',   cls: 'bg-amber-50 text-amber-700 border-amber-200',     icon: Clock,         dot: 'bg-amber-500' },
@@ -30,6 +32,8 @@ const WorkerDashboard = () => {
   const [downloadedFiles, setDownloadedFiles] = useState(new Set());
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [pageError, setPageError] = useState('');
+  const [pickupSlots, setPickupSlots] = useState([]);
+  const [pickupNotificationBookings, setPickupNotificationBookings] = useState([]);
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -39,6 +43,7 @@ const WorkerDashboard = () => {
         api.get(`/analytics/worker/${user._id}`)
       ]);
       setPending(pendingRes.data.slice(0, 5));
+      setPickupNotificationBookings(tasksRes.data);
       setMyTasks(tasksRes.data.filter(t => t.status !== 'completed').slice(0, 5));
       setStats({
         completed: analyticsRes.data.totalCompleted || 0,
@@ -69,7 +74,17 @@ const WorkerDashboard = () => {
   const updateStatus = async (id, status) => {
     setPageError('');
     setUpdating(id);
-    try { await api.patch(`/bookings/${id}/status`, { status }); fetchDashboard(); if (status === 'completed') setConfirmComplete(null); }
+    try {
+      const payload = { status };
+      if (status === 'completed') {
+        payload.pickupSlots = pickupSlots
+          .filter(slot => slot.date)
+          .map(slot => ({ date: new Date(slot.date).toISOString(), note: slot.note }));
+      }
+      await api.patch(`/bookings/${id}/status`, payload);
+      fetchDashboard();
+      if (status === 'completed') { setConfirmComplete(null); setPickupSlots([]); }
+    }
     catch (err) { setPageError(err.response?.data?.message || 'Failed to update'); }
     finally { setUpdating(null); }
   };
@@ -129,6 +144,8 @@ const WorkerDashboard = () => {
           </button>
         </div>
       </div>
+
+      <PickupNotifications bookings={pickupNotificationBookings} onRefresh={fetchDashboard} onError={setPageError} />
 
       {/* Stats Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
@@ -221,7 +238,7 @@ const WorkerDashboard = () => {
                                 </span>
                               )}
                               <button
-                                onClick={() => setConfirmComplete(t)}
+                                onClick={() => { setConfirmComplete(t); setPickupSlots([]); }}
                                 disabled={getBookingFiles(t).length > 0 && !areAllBookingFilesDownloaded(t, downloadedFiles)}
                                 className="text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                               >
@@ -341,6 +358,7 @@ const WorkerDashboard = () => {
                 <AlertCircle size={11} /> Download all PDFs before completing
               </p>
             )}
+            <PickupSlotFields slots={pickupSlots} onChange={setPickupSlots} />
             <div className="flex gap-3">
               <button onClick={() => setConfirmComplete(null)} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-600 bg-gray-50 hover:bg-gray-100 transition-colors">Cancel</button>
               <button

@@ -4,12 +4,14 @@ import { useAuth } from '../contexts/AuthContext';
 import api from '../utils/api';
 import {
   CheckCircle, Clock, AlertCircle, Star, Loader2, XCircle, Package,
-  RefreshCw, Calendar, User, ArrowRight, MessageSquare, Phone, Search, Filter
+  RefreshCw, Calendar, ArrowRight, MessageSquare, Phone, Search, CalendarClock, CreditCard
 } from 'lucide-react';
 import { formatWhatsAppUrl } from '../utils/phone';
 import FrontendMessage from '../components/FrontendMessage';
+import { openRazorpayCheckout } from '../utils/razorpay';
 
 const statusConfig = {
+  awaiting_payment: { label: 'Awaiting payment', cls: 'bg-violet-50 text-violet-700 border-violet-200', icon: CreditCard, dot: 'bg-violet-500', desc: 'Pay online to activate this booking' },
   pending:     { label: 'Pending',     cls: 'bg-amber-50 text-amber-700 border-amber-200',     icon: Clock,         dot: 'bg-amber-500', desc: 'Waiting for a worker to pick up' },
   accepted:    { label: 'Accepted',    cls: 'bg-blue-50 text-blue-700 border-blue-200',       icon: CheckCircle,   dot: 'bg-blue-500', desc: 'A worker has been assigned' },
   in_progress: { label: 'Working',     cls: 'bg-orange-50 text-orange-700 border-orange-200', icon: AlertCircle,   dot: 'bg-orange-500', desc: 'Your request is being worked on' },
@@ -30,6 +32,10 @@ const MyBookingsPage = () => {
   const [submitting, setSubmitting] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [pageError, setPageError] = useState('');
+  const [pickupBooking, setPickupBooking] = useState(null);
+  const [selectedPickupSlot, setSelectedPickupSlot] = useState('');
+  const [savingPickup, setSavingPickup] = useState(false);
+  const [payingId, setPayingId] = useState(null);
 
   const fetchBookings = useCallback(async () => {
     try {
@@ -49,9 +55,50 @@ const MyBookingsPage = () => {
     finally { setSubmitting(false); }
   };
 
+  const openPickupSelection = (booking) => {
+    setPickupBooking(booking);
+    setSelectedPickupSlot(booking.selectedPickupSlot || '');
+  };
+
+  const savePickupSelection = async () => {
+    setPageError('');
+    setSavingPickup(true);
+    try {
+      await api.patch(`/bookings/${pickupBooking._id}/pickup-slot`, {
+        pickupSlot: selectedPickupSlot || null
+      });
+      setPickupBooking(null);
+      await fetchBookings();
+    } catch (err) {
+      setPageError(err.response?.data?.message || 'Failed to save pickup time');
+    } finally {
+      setSavingPickup(false);
+    }
+  };
+
+  const formatPickupSlot = (slot) =>
+    new Date(slot?.date || slot).toLocaleString('en-IN', {
+      weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+      hour: 'numeric', minute: '2-digit'
+    });
+
+  const payForBooking = async (booking) => {
+    setPageError('');
+    setPayingId(booking._id);
+    try {
+      const res = await api.post(`/bookings/${booking._id}/payment-order`);
+      const paidBooking = await openRazorpayCheckout(res.data);
+      if (paidBooking) await fetchBookings();
+    } catch (err) {
+      setPageError(err.response?.data?.message || err.message || 'Could not complete payment');
+    } finally {
+      setPayingId(null);
+    }
+  };
+
   const filtered = bookings.filter(b => {
     if (filter === 'all') return true;
-    if (filter === 'active') return ['pending', 'accepted', 'in_progress'].includes(b.status);
+    if (filter === 'active') return ['awaiting_payment', 'pending', 'accepted', 'in_progress'].includes(b.status);
     return b.status === filter;
   }).filter(b => {
     if (!search) return true;
@@ -61,7 +108,7 @@ const MyBookingsPage = () => {
 
   const stats = {
     all: bookings.length,
-    active: bookings.filter(b => ['pending', 'accepted', 'in_progress'].includes(b.status)).length,
+    active: bookings.filter(b => ['awaiting_payment', 'pending', 'accepted', 'in_progress'].includes(b.status)).length,
     completed: bookings.filter(b => b.status === 'completed').length,
     pending: bookings.filter(b => b.status === 'pending').length,
   };
@@ -107,7 +154,7 @@ const MyBookingsPage = () => {
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3 mb-6">
         <div className="flex gap-2 flex-wrap">
-          {['all', 'active', 'pending', 'accepted', 'in_progress', 'completed', 'rejected'].map(f => (
+          {['all', 'active', 'awaiting_payment', 'pending', 'accepted', 'in_progress', 'completed', 'rejected'].map(f => (
             <button key={f} onClick={() => setFilter(f)}
               className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all ${filter === f ? 'bg-gray-900 text-white shadow-sm' : 'bg-white text-gray-600 border border-gray-200 hover:border-gray-300'}`}>
               {f === 'all' ? 'All' : statusConfig[f]?.label || f}
@@ -138,7 +185,7 @@ const MyBookingsPage = () => {
             const Icon = st?.icon || Clock;
             return (
               <div key={b._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-all overflow-hidden">
-                <div className={`h-1 w-full ${b.status === 'completed' ? 'bg-emerald-400' : b.status === 'in_progress' ? 'bg-orange-400' : b.status === 'accepted' ? 'bg-blue-400' : b.status === 'rejected' ? 'bg-red-400' : 'bg-amber-400'}`} />
+                <div className={`h-1 w-full ${b.status === 'completed' ? 'bg-emerald-400' : b.status === 'in_progress' ? 'bg-orange-400' : b.status === 'accepted' ? 'bg-blue-400' : b.status === 'awaiting_payment' ? 'bg-violet-400' : b.status === 'rejected' ? 'bg-red-400' : 'bg-amber-400'}`} />
                 <div className="p-5">
                   <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
@@ -165,6 +212,19 @@ const MyBookingsPage = () => {
                       {b.status === 'completed' && !b.rating && (
                         <button onClick={() => setRatingBooking(b)} className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition-colors">
                           <Star size={12} /> Rate this service
+                        </button>
+                      )}
+                      {b.status === 'completed' && b.pickupSlots?.length > 0 && (
+                        <button onClick={() => openPickupSelection(b)} className="mt-2 ml-2 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors">
+                          <CalendarClock size={12} />
+                          {b.selectedPickupSlot ? `Pickup: ${formatPickupSlot(b.selectedPickupSlot)}` : 'Choose pickup time'}
+                        </button>
+                      )}
+                      {b.status === 'awaiting_payment' && (
+                        <button onClick={() => payForBooking(b)} disabled={payingId === b._id}
+                          className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-violet-600 px-3 py-1.5 rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50">
+                          {payingId === b._id ? <Loader2 size={12} className="animate-spin" /> : <CreditCard size={12} />}
+                          Pay ₹{b.estimatedCost} now
                         </button>
                       )}
                     </div>
@@ -217,6 +277,12 @@ const MyBookingsPage = () => {
                 <div><p className="text-xs text-gray-400 mb-1">Service</p><p className="font-semibold text-gray-900">{selectedBooking.serviceName}</p></div>
                 <div><p className="text-xs text-gray-400 mb-1">Quantity</p><p className="font-semibold text-gray-900">{selectedBooking.quantity}</p></div>
                 <div><p className="text-xs text-gray-400 mb-1">Estimated Cost</p><p className="font-semibold text-gray-900">₹{selectedBooking.estimatedCost}</p></div>
+                <div>
+                  <p className="text-xs text-gray-400 mb-1">Payment</p>
+                  <p className="font-semibold text-gray-900">
+                    {selectedBooking.paymentStatus === 'paid' ? 'Paid online' : selectedBooking.paymentMethod === 'online' ? 'Online payment pending' : 'Pay on delivery'}
+                  </p>
+                </div>
                 {selectedBooking.finalCost && <div><p className="text-xs text-gray-400 mb-1">Final Cost</p><p className="font-semibold text-gray-900">₹{selectedBooking.finalCost}</p></div>}
                 <div><p className="text-xs text-gray-400 mb-1">Created</p><p className="font-semibold text-gray-900">{new Date(selectedBooking.createdAt).toLocaleString('en-IN')}</p></div>
               </div>
@@ -233,6 +299,57 @@ const MyBookingsPage = () => {
                   <p className="text-sm text-gray-600 flex items-center gap-1"><Phone size={12} />{selectedBooking.assignedWorkerPhone}</p>
                 </div>
               )}
+              {selectedBooking.pickupSlots?.length > 0 && (
+                <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                  <p className="text-xs font-medium uppercase tracking-wide text-blue-500">Pickup</p>
+                  <p className="mt-1 text-sm text-blue-900">
+                    {selectedBooking.selectedPickupSlot
+                      ? `Selected: ${formatPickupSlot(selectedBooking.selectedPickupSlot)}`
+                      : 'The worker has offered pickup times. Selection is optional.'}
+                  </p>
+                  <button onClick={() => { setSelectedBooking(null); openPickupSelection(selectedBooking); }} className="mt-3 text-xs font-semibold text-blue-700 hover:text-blue-900">
+                    {selectedBooking.selectedPickupSlot ? 'Change pickup time' : 'View available times'}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pickupBooking && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
+                <CalendarClock size={20} className="text-blue-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Choose pickup time</h3>
+                <p className="text-xs text-gray-500">{pickupBooking.serviceName}</p>
+              </div>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">This is optional. You can choose later or visit after contacting the worker.</p>
+            <div className="space-y-2">
+              <label className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 ${!selectedPickupSlot ? 'border-blue-400 bg-blue-50' : 'border-gray-200'}`}>
+                <input type="radio" name="pickupSlot" checked={!selectedPickupSlot} onChange={() => setSelectedPickupSlot('')} />
+                <span className="text-sm font-medium text-gray-700">No selection for now</span>
+              </label>
+              {pickupBooking.pickupSlots.map((slot) => (
+                <label key={slot.date} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 ${selectedPickupSlot === slot.date ? 'border-blue-400 bg-blue-50' : 'border-gray-200'}`}>
+                  <input className="mt-1" type="radio" name="pickupSlot" checked={selectedPickupSlot === slot.date} onChange={() => setSelectedPickupSlot(slot.date)} />
+                  <span>
+                    <span className="block text-sm font-medium text-gray-700">{formatPickupSlot(slot.date)}</span>
+                    {slot.note && <span className="mt-1 block text-xs text-gray-500">{slot.note}</span>}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setPickupBooking(null)} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-600 bg-gray-50 hover:bg-gray-100">Cancel</button>
+              <button onClick={savePickupSelection} disabled={savingPickup} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50">
+                {savingPickup ? 'Saving...' : 'Save choice'}
+              </button>
             </div>
           </div>
         </div>

@@ -8,6 +8,8 @@ import {
   Filter, Package, Search, Download, FileText, IndianRupee, Eye, Zap
 } from 'lucide-react';
 import FrontendMessage from '../components/FrontendMessage';
+import PickupSlotFields from '../components/PickupSlotFields';
+import PickupNotifications from '../components/PickupNotifications';
 
 const statusConfig = {
   pending:     { label: 'Pending',     class: 'bg-amber-50 text-amber-700 border-amber-200',     icon: Clock,         dot: 'bg-amber-500' },
@@ -30,6 +32,7 @@ const MyTasksPage = () => {
   const [downloadedFiles, setDownloadedFiles] = useState(new Set());
   const [selectedTask, setSelectedTask] = useState(null);
   const [pageError, setPageError] = useState('');
+  const [pickupSlots, setPickupSlots] = useState([]);
 
   useEffect(() => { fetchTasks(); }, []);
 
@@ -42,7 +45,17 @@ const MyTasksPage = () => {
   const updateStatus = async (id, status) => {
     setPageError('');
     setUpdating(id);
-    try { await api.patch(`/bookings/${id}/status`, { status }); fetchTasks(); if (status === 'completed') setConfirmComplete(null); }
+    try {
+      const payload = { status };
+      if (status === 'completed') {
+        payload.pickupSlots = pickupSlots
+          .filter(slot => slot.date)
+          .map(slot => ({ date: new Date(slot.date).toISOString(), note: slot.note }));
+      }
+      await api.patch(`/bookings/${id}/status`, payload);
+      fetchTasks();
+      if (status === 'completed') { setConfirmComplete(null); setPickupSlots([]); }
+    }
     catch (err) { setPageError(err.response?.data?.message || 'Failed to update'); }
     finally { setUpdating(null); }
   };
@@ -99,6 +112,8 @@ const MyTasksPage = () => {
           <p className="text-sm text-gray-500">All your assigned work in one place</p>
         </div>
       </div>
+
+      <PickupNotifications bookings={tasks} onRefresh={fetchTasks} onError={setPageError} />
 
       {/* Quick Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
@@ -229,7 +244,7 @@ const MyTasksPage = () => {
                     </button>
                   )}
                   {task.status === 'in_progress' && (
-                    <button onClick={() => setConfirmComplete(task)}
+                    <button onClick={() => { setConfirmComplete(task); setPickupSlots([]); }}
                       disabled={getBookingFiles(task).length > 0 && !areAllBookingFilesDownloaded(task, downloadedFiles)}
                       className="flex-1 text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 py-2 rounded-lg hover:bg-emerald-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5">
                       <CheckCircle size={12} /> Mark Complete
@@ -305,6 +320,7 @@ const MyTasksPage = () => {
                 <AlertCircle size={11} /> Download all PDFs before completing
               </p>
             )}
+            <PickupSlotFields slots={pickupSlots} onChange={setPickupSlots} />
             <div className="flex gap-3">
               <button onClick={() => setConfirmComplete(null)} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-600 bg-gray-50 hover:bg-gray-100 transition-colors">Cancel</button>
               <button onClick={() => updateStatus(confirmComplete._id, 'completed')}

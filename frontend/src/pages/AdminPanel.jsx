@@ -98,6 +98,7 @@ const AdminPanel = () => {
 
   const statusBadge = (status) => {
     const config = {
+      awaiting_payment: 'bg-violet-50 text-violet-700 border-violet-200',
       pending: 'bg-amber-50 text-amber-700 border-amber-200',
       accepted: 'bg-blue-50 text-blue-700 border-blue-200',
       in_progress: 'bg-orange-50 text-orange-700 border-orange-200',
@@ -396,6 +397,7 @@ const AdminPanel = () => {
                   className="px-4 py-2.5 rounded-xl text-sm border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500">
                   <option value="all">All Status</option>
                   <option value="pending">Pending</option>
+                  <option value="awaiting_payment">Awaiting payment</option>
                   <option value="accepted">Accepted</option>
                   <option value="in_progress">In Progress</option>
                   <option value="completed">Completed</option>

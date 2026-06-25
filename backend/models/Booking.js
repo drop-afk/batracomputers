@@ -12,7 +12,7 @@ const bookingSchema = new mongoose.Schema({
   preferredDeadline: { type: Date },
   status: {
     type: String,
-    enum: ['pending', 'accepted', 'in_progress', 'completed', 'rejected'],
+    enum: ['awaiting_payment', 'pending', 'accepted', 'in_progress', 'completed', 'rejected'],
     default: 'pending'
   },
   assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
@@ -21,6 +21,19 @@ const bookingSchema = new mongoose.Schema({
   estimatedCost: { type: Number, required: true, min: 0 },
   finalCost: { type: Number, default: null, min: 0 },
   paid: { type: Boolean, default: false },
+  paymentMethod: {
+    type: String,
+    enum: ['online', 'pay_on_delivery'],
+    default: 'pay_on_delivery'
+  },
+  paymentStatus: {
+    type: String,
+    enum: ['pending', 'paid', 'pay_on_delivery', 'failed'],
+    default: 'pay_on_delivery'
+  },
+  razorpayOrderId: { type: String, default: null },
+  razorpayPaymentId: { type: String, default: null },
+  paidAt: { type: Date, default: null },
   // File upload for photocopy / printing services
   fileUrl: { type: String, default: null },
   fileName: { type: String, default: null },
@@ -35,6 +48,13 @@ const bookingSchema = new mongoose.Schema({
   // Removed manual createdAt — handled by timestamps:true below (Issue #18)
   acceptedAt: { type: Date, default: null },
   completedAt: { type: Date, default: null },
+  pickupSlots: [{
+    date: { type: Date, required: true },
+    note: { type: String, trim: true, maxlength: 300, default: '' }
+  }],
+  selectedPickupSlot: { type: Date, default: null },
+  pickupSelectedAt: { type: Date, default: null },
+  pickupSelectionSeenAt: { type: Date, default: null },
   internalNotes: { type: String, trim: true, maxlength: 2000 },
   customerFeedback: { type: String, trim: true, maxlength: 500 },
   rating: { type: Number, min: 1, max: 5, default: null }
