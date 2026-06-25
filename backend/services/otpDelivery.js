@@ -3,9 +3,9 @@ const nodemailer = require('nodemailer');
 const isDevOtpMode = () =>
   process.env.NODE_ENV !== 'production' && process.env.OTP_DEV_MODE === 'true';
 
-// Temporary signup mode. Set this to false once the delivery providers are ready.
-const isScreenOtpMode = () =>
-  process.env.DISPLAY_SIGNUP_OTP !== 'false';
+// Temporary signup mode: always display OTPs until delivery providers are ready.
+// Keep this helper so switching to SMTP/WhatsApp-only mode later is one change.
+const isScreenOtpMode = () => true;
 
 const sendEmailOtp = async ({ email, name, otp }) => {
   if (isDevOtpMode()) {
